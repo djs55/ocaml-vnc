@@ -1,0 +1,15 @@
+name: vnc
+version: 0.0.1
+synopsis: A pure OCaml RFB protocol implementation, as used in VNC
+obuild-ver: 1
+
+library vnc
+  modules: Rfb
+  src-dir: lib
+  c-dir: ./
+  build-deps: unix
+
+executable rfb_randomtest
+  main-is: rfb_randomtest_main.ml
+  src-dir: lib_test
+  build-deps: vnc

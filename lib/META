@@ -1,0 +1,9 @@
+version = "0.0.1"
+description = "RFB protocol client"
+requires = "unix"
+archive(byte) = "vnc.cma"
+archive(byte, plugin) = "vnc.cma"
+archive(native) = "vnc.cmxa"
+archive(native, plugin) = "vnc.cmxs"
+exists_if = "vnc.cma"
+
