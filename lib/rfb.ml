@@ -11,7 +11,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU Lesser General Public License for more details.
  *)
-open Stringext
 
 (* TODO:
    1. Check for overflow in UInt32/UInt64 
@@ -19,8 +18,16 @@ open Stringext
 
 exception Truncated
 
-let _marshal (x: int list) = String.implode (List.map char_of_int (List.map (fun x -> x land 0xff) x))
-let _unmarshal (x: string) = List.map int_of_char (String.explode x)
+let _marshal (x: int list) =
+  let chars = List.map char_of_int (List.map (fun x -> x land 0xff) x) in
+  let buf = String.make (List.length chars) '\000' in
+  List.iteri (fun i c -> buf.[i] <- c) chars;
+  buf
+let _unmarshal (x: string) =
+  let rec explode acc = function
+    | -1 -> acc
+    | n -> explode (x.[n] :: acc) (n - 1) in
+ List.map int_of_char (explode [] (String.length x - 1))
 
 let blit src srcoff dst dstoff len = 
     (* Printf.printf "blit src_len=%d srcoff=%d dst_len=%d dstoff=%d len=%d\n" (String.length src) srcoff (String.length dst) dstoff len;  *)
@@ -114,10 +121,14 @@ module ProtocolVersion = struct
 
   exception Unmarshal_failure
 
+  let startswith prefix x =
+    let prefix' = String.length prefix and x' = String.length x in
+    x' >= prefix' && (String.sub x 0 prefix' = prefix)
+
   let marshal (x: t) = Printf.sprintf "RFB %03x.%03x\n" x.major x.minor
   let unmarshal (s: Unix.file_descr) = 
     let x = really_read s 12 in
-    if not(String.startswith "RFB " x)
+    if not(startswith "RFB " x)
     then raise Unmarshal_failure;
     let major = int_of_string (String.sub x 4 3)
     and minor = int_of_string (String.sub x 8 3) in
