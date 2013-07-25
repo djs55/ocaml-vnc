@@ -16,7 +16,7 @@ open Rfb
 let w = 640
 let h = 480
 
-module Server = Rfb.Make(Rfb.FD)
+module Server = Rfb.Make(Rfb_unix)
 open Server
 
 let server (s: Unix.file_descr) = 
@@ -41,7 +41,7 @@ let server (s: Unix.file_descr) =
 	    let raw = { FramebufferUpdate.Raw.buffer = buffer } in
 	    let update = { FramebufferUpdate.x = 0; y = 0; w = w; h = h;
 			   encoding = FramebufferUpdate.Encoding.Raw raw } in
-	    FD.really_write s (FramebufferUpdate.marshal [ update ]);
+	    Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ]);
 	    started := true;
 	end else begin
 	    (* send a copyrect *)
@@ -51,7 +51,7 @@ let server (s: Unix.file_descr) =
 	    let cr = { FramebufferUpdate.CopyRect.x = x''; y = y'' } in
 	    let update = { FramebufferUpdate.x = x'; y = y'; w = w'; h = h';
 			   encoding = FramebufferUpdate.Encoding.CopyRect cr } in
-	    FD.really_write s (FramebufferUpdate.marshal [ update ])
+	    Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ])
 	  end
     | _ -> ()
   done

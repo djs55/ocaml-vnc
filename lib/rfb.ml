@@ -98,28 +98,6 @@ module UInt64 = struct
   let of_int64 x = x
 end
 
-module FD = struct
-  type t = Unix.file_descr
-
-(** Really read, raising End_of_file if no more data *)
-let really_read fd n = 
-  let buf = String.make n '\000' in
-  let rec rread fd buf ofs len = 
-    let n = Unix.read fd buf ofs len in
-    if n = 0 then raise End_of_file;
-    if n < len then rread fd buf (ofs + n) (len - n) in
-  rread fd buf 0 n;
-  buf
-let really_write fd buf = 
-(*
-  Printf.printf "About to write %d bytes [ %s ]\n"
-    (String.length buf) (String.concat " " (List.map (fun x -> Printf.sprintf "%02x" (int_of_char x)) (String.explode buf))); 
-(*Unix.sleep 2; *)
-*)
-  let len = Unix.write fd buf 0 (String.length buf) in
-  if len <> String.length buf then raise End_of_file
-end
-
 module type CHANNEL = sig
   type t
 

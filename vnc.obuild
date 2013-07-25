@@ -6,10 +6,13 @@ obuild-ver: 1
 library vnc
   modules: Rfb
   src-dir: lib
-  c-dir: ./
+
+library vnc.unix
+  modules: Rfb_unix
+  src-dir: lib
   build-deps: unix
 
 executable rfb_randomtest
   main-is: rfb_randomtest_main.ml
   src-dir: lib_test
-  build-deps: vnc
+  build-deps: vnc, vnc.unix
