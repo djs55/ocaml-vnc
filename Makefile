@@ -1,4 +1,4 @@
-OBUILDOPTS=--debug+
+#OBUILDOPTS=--debug+
 #CONFOPTS=--enable-library-bytecode --enable-executable-bytecode
 PKGNAME=vnc
 
