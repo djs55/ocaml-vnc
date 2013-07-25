@@ -98,6 +98,9 @@ module UInt64 = struct
   let of_int64 x = x
 end
 
+module FD = struct
+  type t = Unix.file_descr
+
 (** Really read, raising End_of_file if no more data *)
 let really_read fd n = 
   let buf = String.make n '\000' in
@@ -115,6 +118,17 @@ let really_write fd buf =
 *)
   let len = Unix.write fd buf 0 (String.length buf) in
   if len <> String.length buf then raise End_of_file
+end
+
+module type CHANNEL = sig
+  type t
+
+  val really_read: t -> int -> string
+  val really_write: t -> string -> unit
+end
+
+module Make = functor(Channel: CHANNEL) -> struct
+  open Channel
 
 module ProtocolVersion = struct
   type t = { major: int; minor: int }
@@ -126,7 +140,7 @@ module ProtocolVersion = struct
     x' >= prefix' && (String.sub x 0 prefix' = prefix)
 
   let marshal (x: t) = Printf.sprintf "RFB %03x.%03x\n" x.major x.minor
-  let unmarshal (s: Unix.file_descr) = 
+  let unmarshal (s: Channel.t) = 
     let x = really_read s 12 in
     if not(startswith "RFB " x)
     then raise Unmarshal_failure;
@@ -142,7 +156,7 @@ module Error = struct
   type t = string
 
   let marshal (x: t) = UInt32.marshal (Int32.of_int (String.length x)) ^ x
-  let unmarshal (s: Unix.file_descr) = 
+  let unmarshal (s: Channel.t) = 
     let len = UInt32.unmarshal (really_read s 4) in
     really_read s (Int32.to_int len)
 end
@@ -158,7 +172,7 @@ module SecurityType = struct
     | NoSecurity -> UInt32.marshal 1l
     | VNCAuth -> UInt32.marshal 2l
 
-  let unmarshal (s: Unix.file_descr) = 
+  let unmarshal (s: Channel.t) = 
     match UInt32.unmarshal (really_read s 4) with
     | 0l -> Failed (Error.unmarshal s)
     | 1l -> NoSecurity
@@ -170,7 +184,7 @@ module ClientInit = struct
   type t = bool (* shared-flag *)
 
   let marshal (x: t) = if x then "x" else "\000"
-  let unmarshal (s: Unix.file_descr) = 
+  let unmarshal (s: Channel.t) = 
     match (really_read s 1).[0] with
     | '\000' -> false
     | _ -> true
@@ -208,7 +222,7 @@ module PixelFormat = struct
     bpp ^ depth ^ big_endian ^ true_colour ^ 
       red_max ^ green_max ^ blue_max ^ red_shift ^ green_shift ^ blue_shift ^
       "   " (* padding *)
-  let unmarshal (s: Unix.file_descr) =
+  let unmarshal (s: Channel.t) =
     let buf = really_read s 16 in
     { bpp = int_of_char buf.[0];
       depth = int_of_char buf.[1];
@@ -244,7 +258,7 @@ module SetPixelFormat = struct
     let padding = "\000\000\000" in
     ty ^ padding ^ (PixelFormat.marshal x)
 
-  let unmarshal (s: Unix.file_descr) =
+  let unmarshal (s: Channel.t) =
     ignore(really_read s 3);
     PixelFormat.unmarshal s
 
@@ -256,7 +270,7 @@ end
 module SetEncodings = struct
   type t = UInt32.t list
 
-  let unmarshal (s: Unix.file_descr) = 
+  let unmarshal (s: Channel.t) = 
     ignore(really_read s 1); (* padding *)
     let num = UInt16.unmarshal (really_read s 2) in
     let encodings = ref [] in
@@ -274,7 +288,7 @@ module FramebufferUpdateRequest = struct
 	     x: int; y: int;
 	     width: int; height: int }
 
-  let unmarshal (s: Unix.file_descr) = 
+  let unmarshal (s: Channel.t) = 
     let buf = really_read s 9 in
     { incremental = buf.[0] <> '\000';
       x = UInt16.unmarshal (String.sub buf 1 2);
@@ -373,7 +387,7 @@ end
 module KeyEvent = struct
   type t = { down: bool; key: UInt32.t }
 
-  let unmarshal (s: Unix.file_descr) = 
+  let unmarshal (s: Channel.t) = 
     let buf = really_read s 7 in
     { down = buf.[0] <> '\000';
       key = UInt32.unmarshal (String.sub buf 3 4) }
@@ -385,7 +399,7 @@ end
 module PointerEvent = struct
   type t = { mask: int; x: int; y: int }
 
-  let unmarshal (s: Unix.file_descr) = 
+  let unmarshal (s: Channel.t) = 
     let buf = really_read s 5 in
     { mask = int_of_char buf.[0];
       x = UInt16.unmarshal (String.sub buf 1 2);
@@ -399,7 +413,7 @@ end
 module ClientCutText = struct
   type t = string
 
-  let unmarshal (s: Unix.file_descr) = 
+  let unmarshal (s: Channel.t) = 
     let buf = really_read s 7 in
     let length = UInt32.unmarshal (String.sub buf 3 4) in
     really_read s (Int32.to_int length)
@@ -424,7 +438,7 @@ module Request = struct
     | PointerEvent x -> PointerEvent.prettyprint x
     | ClientCutText x -> ClientCutText.prettyprint x
 
-  let unmarshal (s: Unix.file_descr) = 
+  let unmarshal (s: Channel.t) = 
     match int_of_char (really_read s 1).[0] with
     | 0 ->
 	SetPixelFormat (SetPixelFormat.unmarshal s)
@@ -442,10 +456,11 @@ module Request = struct
 	failwith (Printf.sprintf "Unknown message type: %d" x)
 end
 
+
 let white = (255, 255, 255)
 let black = (0, 0, 0)
 
-let handshake w h (s: Unix.file_descr) =
+let handshake w h (s: Channel.t) =
   let ver = { ProtocolVersion.major = 3; minor = 3 } in
   really_write s (ProtocolVersion.marshal ver);
   let ver' = ProtocolVersion.unmarshal s in
@@ -458,4 +473,4 @@ let handshake w h (s: Unix.file_descr) =
 	     width = w; height = h;
 	     pixelformat = PixelFormat.true_colour_default false } in
   really_write s (ServerInit.marshal si)
-
+end
