@@ -1,0 +1,33 @@
+# OASIS_START
+# DO NOT EDIT (digest: b1367f197f9128408114d721daeaea39)
+# Ignore VCS directories, you can use the same kind of rule outside 
+# OASIS_START/STOP if you want to exclude directories that contains 
+# useless stuff for the build process
+<**/.svn>: -traverse
+<**/.svn>: not_hygienic
+".bzr": -traverse
+".bzr": not_hygienic
+".hg": -traverse
+".hg": not_hygienic
+".git": -traverse
+".git": not_hygienic
+"_darcs": -traverse
+"_darcs": not_hygienic
+# Library vnc
+"lib/vnc.cmxs": use_vnc
+<lib/*.ml{,i}>: pkg_cstruct
+# Library vnc_unix
+"lib/vnc_unix.cmxs": use_vnc_unix
+<lib/*.ml{,i}>: pkg_unix
+# Executable rfb_randomtest
+"lib_test/rfb_randomtest_main.byte": use_vnc
+"lib_test/rfb_randomtest_main.byte": use_vnc_unix
+"lib_test/rfb_randomtest_main.byte": pkg_unix
+"lib_test/rfb_randomtest_main.byte": pkg_cstruct
+<lib_test/*.ml{,i}>: use_vnc
+<lib_test/*.ml{,i}>: use_vnc_unix
+<lib_test/*.ml{,i}>: pkg_unix
+<lib_test/*.ml{,i}>: pkg_cstruct
+# OASIS_STOP
+<*/*>: syntax_camlp4o
+<lib/*.ml{,i}>: pkg_cstruct.syntax

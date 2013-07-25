@@ -1,9 +1,22 @@
+# OASIS_START
+# DO NOT EDIT (digest: 878ad6fba4edc52abb306f498e843436)
 version = "0.0.1"
-description = "RFB protocol client"
-requires = "unix"
+description = "Pure OCaml implementation of the RFB protocol as used in VNC"
+requires = "cstruct"
 archive(byte) = "vnc.cma"
 archive(byte, plugin) = "vnc.cma"
 archive(native) = "vnc.cmxa"
 archive(native, plugin) = "vnc.cmxs"
 exists_if = "vnc.cma"
+package "unix" (
+ version = "0.0.1"
+ description = "Pure OCaml implementation of the RFB protocol as used in VNC"
+ requires = "unix"
+ archive(byte) = "vnc_unix.cma"
+ archive(byte, plugin) = "vnc_unix.cma"
+ archive(native) = "vnc_unix.cmxa"
+ archive(native, plugin) = "vnc_unix.cmxs"
+ exists_if = "vnc_unix.cma"
+)
+# OASIS_STOP
 

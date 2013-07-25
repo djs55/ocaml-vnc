@@ -1,0 +1,28 @@
+OASISFormat:  0.3
+Name:         vnc
+Version:      0.0.1
+Synopsis:     Pure OCaml implementation of the RFB protocol as used in VNC
+License:      LGPL2.1
+Authors:      various
+Copyrights:   (C) 2012 Citrix
+BuildTools:   ocamlbuild
+Plugins:      DevFiles (0.3), META (0.3)
+
+Library vnc
+  Path: lib
+  Modules: Rfb
+  Findlibname: vnc
+  BuildDepends: cstruct
+
+Library vnc_unix
+  Path: lib
+  Modules: Rfb_unix
+  Findlibname: unix
+  Findlibparent: vnc
+  BuildDepends: unix
+
+Executable rfb_randomtest
+  Install: false
+  Path: lib_test
+  MainIs: rfb_randomtest_main.ml
+  BuildDepends: vnc,vnc.unix

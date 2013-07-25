@@ -6,6 +6,8 @@ obuild-ver: 1
 library vnc
   modules: Rfb
   src-dir: lib
+  build-deps: cstruct, cstruct.syntax
+  pp: camlp4o
 
 library vnc.unix
   modules: Rfb_unix

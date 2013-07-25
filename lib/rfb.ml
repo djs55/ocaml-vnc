@@ -48,7 +48,7 @@ module UInt16 = struct
     blit raw 0 buf off 2;
     off + 2
   let unmarshal (x: string) : t = match _unmarshal x with
-    | [ msb; lsb ] -> (msb << 8) || lsb
+    | [ msb; lsb ] -> (msb lsl 8) || lsb
     | _ -> raise Truncated
 
   let prettyprint = string_of_int
@@ -101,7 +101,7 @@ end
 module type CHANNEL = sig
   type t
 
-  val really_read: t -> int -> string
+  val really_read: t -> int -> Cstruct.t
   val really_write: t -> string -> unit
 end
 
@@ -120,10 +120,11 @@ module ProtocolVersion = struct
   let marshal (x: t) = Printf.sprintf "RFB %03x.%03x\n" x.major x.minor
   let unmarshal (s: Channel.t) = 
     let x = really_read s 12 in
-    if not(startswith "RFB " x)
+    let rfb = Cstruct.(to_string (sub x 0 3)) in
+    if rfb <> "RFB "
     then raise Unmarshal_failure;
-    let major = int_of_string (String.sub x 4 3)
-    and minor = int_of_string (String.sub x 8 3) in
+    let major = int_of_string (Cstruct.(to_string (sub x 4 3))) in
+    let minor = int_of_string (Cstruct.(to_string (sub x 8 3))) in
     { major = major; minor = minor }
 
   let prettyprint (x: t) = 
@@ -133,9 +134,13 @@ end
 module Error = struct
   type t = string
 
+  cstruct c {
+    uint32_t length
+  } as little_endian
+
   let marshal (x: t) = UInt32.marshal (Int32.of_int (String.length x)) ^ x
   let unmarshal (s: Channel.t) = 
-    let len = UInt32.unmarshal (really_read s 4) in
+    let len = get_c_length (really_read s 4) in
     really_read s (Int32.to_int len)
 end
 
@@ -145,16 +150,26 @@ module SecurityType = struct
 
   exception Unmarshal_failure
 
+  cenum code {
+    FAILED;
+    NOSECURITY;
+    VNCAUTH
+  } as uint32_t 
+
+  cstruct c {
+    ty: uint32_t
+  } as little_endian
+
   let marshal (x: t) = match x with
     | Failed x -> UInt32.marshal 0l ^ (Error.marshal x)
     | NoSecurity -> UInt32.marshal 1l
     | VNCAuth -> UInt32.marshal 2l
 
   let unmarshal (s: Channel.t) = 
-    match UInt32.unmarshal (really_read s 4) with
-    | 0l -> Failed (Error.unmarshal s)
-    | 1l -> NoSecurity
-    | 2l -> VNCAuth    
+    match code_of_int32 (get_c_ty (really_read s 4)) with
+    | FAILED -> Failed (Error.unmarshal s)
+    | NOSECURITY -> NoSecurity
+    | VNCAUTH -> VNCAuth    
     | _ -> raise Unmarshal_failure  
 end
 
