@@ -22,7 +22,8 @@ Library vnc_unix
   BuildDepends: unix
 
 Executable rfb_randomtest
+  CompiledObject: best
   Install: false
   Path: lib_test
   MainIs: rfb_randomtest_main.ml
-  BuildDepends: vnc,vnc.unix
+  BuildDepends: vnc,vnc.unix,threads

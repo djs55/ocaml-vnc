@@ -309,6 +309,8 @@ module FramebufferUpdate = struct
         let length = sizeof x in
         blit x.buffer 0 buf off length;
         off + length
+    let prettyprint (x: t) = 
+      "FrameBufferUpdate"
   end
   module CopyRect = struct
     type t = { x: int; y: int }
@@ -369,6 +371,9 @@ module FramebufferUpdate = struct
       x ^ y ^ w ^ h ^ (Encoding.marshal one.encoding) in
     let length = UInt16.marshal (List.length xs) in
     "\000\000" ^ length ^ (String.concat "" (List.map update xs))
+  let prettyprint (t: t) =
+    Printf.sprintf "FramebufferUpdate {x=%d y=%d w=%d h=%d encoding=%s}"
+      t.x t.y t.w t.h (Encoding.prettyprint t.encoding)
 end
 
 module SetColourMapEntries = struct
