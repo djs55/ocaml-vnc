@@ -1,27 +1,11 @@
-#OBUILDOPTS=--debug+
-#CONFOPTS=--enable-library-bytecode --enable-executable-bytecode
-PKGNAME=vnc
-
-ifneq "$(DESTDIR)" ""
-INSTALL_ARGS := -destdir $(DESTDIR)
-endif
-
-.PHONY: configure build install clean uninstall
-
 all: build
 
-configure:
-	obuild $(OBUILDOPTS) configure $(CONFOPTS)
+configure: setup.data
+	ocaml setup.ml -configure
 
 build: configure
-	obuild $(OBUILDOPTS) build
+	ocaml setup.ml -build
 
-install: build
-	ocamlfind remove $(PKGNAME)
-	ocamlfind install $(PKGNAME) $(shell find dist/build/lib-vnc -type f) lib/META $(INSTALL_ARGS)
-
+.PHONY: clean
 clean:
-	obuild clean
-
-uninstall:
-	ocamlfind remove $(PKGNAME)
+	rm -rf _build
