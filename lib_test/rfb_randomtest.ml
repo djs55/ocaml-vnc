@@ -19,41 +19,47 @@ let h = 480
 module Server = Rfb.Make(Rfb_unix)
 open Server
 
+let send_random_updates bpp s =
+  (* Update the whole thing *)
+  let buffer = String.create (w * h * bpp / 8) in
+  for i = 0 to String.length buffer - 1 do
+    buffer.[i] <- char_of_int (Random.int 255)
+  done;
+  let raw = { FramebufferUpdate.Raw.buffer = buffer } in
+  let update = { FramebufferUpdate.x = 0; y = 0; w = w; h = h;
+                 encoding = FramebufferUpdate.Encoding.Raw raw } in
+  print_endline ("-> " ^ (FramebufferUpdate.prettyprint update));
+  Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ]);
+  while true do
+(* Thread.delay 0.1; *)
+    (* send a copyrect *)
+    let w' = Random.int (w - 1) + 1 and h' = Random.int (h - 1) + 1 in
+    let x' = Random.int (w - w') and y' = Random.int (h - h') in
+    let x'' = Random.int (w - w') and y'' = Random.int (h - h') in
+    let cr = { FramebufferUpdate.CopyRect.x = x'' ; y = y'' } in
+    let update = { FramebufferUpdate.x = x'; y = y'; w = w'; h = h';
+                   encoding = FramebufferUpdate.Encoding.CopyRect cr } in
+    print_endline ("-> " ^ (FramebufferUpdate.prettyprint update));
+    Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ])
+  done
+
 let server (s: Unix.file_descr) = 
   Server.handshake w h s;
 
-  let started = ref false in
   let bpp = ref 32 in
+  let update_thread = ref None in
 
   while true do
     let req = Request.unmarshal s in
-    print_endline (Request.prettyprint req);
+    print_endline ("<- " ^ (Request.prettyprint req));
     match req with
     | Request.SetPixelFormat pf ->
 	bpp := pf.PixelFormat.bpp;
     | Request.FrameBufferUpdateRequest _ ->
-	if not(!started) then begin
-	    (* Update the whole thing *)
-	    let buffer = String.create (w * h * !bpp / 8) in
-	    for i = 0 to String.length buffer - 1 do
-	      buffer.[i] <- char_of_int (Random.int 255)
-	    done;
-	    let raw = { FramebufferUpdate.Raw.buffer = buffer } in
-	    let update = { FramebufferUpdate.x = 0; y = 0; w = w; h = h;
-			   encoding = FramebufferUpdate.Encoding.Raw raw } in
-	    Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ]);
-	    started := true;
-	end else begin
-	    (* send a copyrect *)
-	    let w' = Random.int w and h' = Random.int h in
-	    let x' = Random.int (w - w') and y' = Random.int (h - h') in
-	    let x'' = Random.int (w - w') and y'' = Random.int (h - h') in
-	    let cr = { FramebufferUpdate.CopyRect.x = x''; y = y'' } in
-	    let update = { FramebufferUpdate.x = x'; y = y'; w = w'; h = h';
-			   encoding = FramebufferUpdate.Encoding.CopyRect cr } in
-	    Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ])
-	  end
-    | _ -> ()
+        if !update_thread = None
+        then update_thread := Some (Thread.create (send_random_updates !bpp) s)
+    | _ ->
+	print_endline "<- ^^ ignoring";
   done
   
 
