@@ -126,7 +126,7 @@ module ProtocolVersion = struct
   let marshal (x: t) = Printf.sprintf "RFB %03x.%03x\n" x.major x.minor
   let unmarshal (s: Channel.t) = 
     let x = really_read s 12 in
-    let rfb = Cstruct.(to_string (sub x 0 3)) in
+    let rfb = Cstruct.(to_string (sub x 0 4)) in
     if rfb <> "RFB "
     then raise Unmarshal_failure;
     let major = int_of_string (Cstruct.(to_string (sub x 4 3))) in
