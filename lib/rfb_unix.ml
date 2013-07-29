@@ -22,7 +22,9 @@ let really_read fd n =
     if n = 0 then raise End_of_file;
     if n < len then rread fd buf (ofs + n) (len - n) in
   rread fd buf 0 n;
-  buf
+  let result = Cstruct.create n in
+  Cstruct.blit_from_string buf 0 result 0 n;
+  result
 let really_write fd buf = 
 (*
   Printf.printf "About to write %d bytes [ %s ]\n"

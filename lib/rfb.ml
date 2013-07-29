@@ -47,9 +47,11 @@ module UInt16 = struct
     let raw = marshal x in
     blit raw 0 buf off 2;
     off + 2
-  let unmarshal (x: string) : t = match _unmarshal x with
-    | [ msb; lsb ] -> (msb lsl 8) || lsb
-    | _ -> raise Truncated
+  let unmarshal (x: Cstruct.t) : t =
+    if Cstruct.len x < 2 then raise Truncated;
+    let msb = Cstruct.get_uint8 x 0 in
+    let lsb = Cstruct.get_uint8 x 1 in
+    (msb lsl 8) || lsb
 
   let prettyprint = string_of_int
   let to_int x = x
@@ -60,7 +62,7 @@ module UInt32 = struct
   type t = int32
 
   let (||) = Int32.logor
-  let (<<) = Int32.shift_left
+  let (lsl) = Int32.shift_left
   let (>>) = Int32.shift_right
   let (&&) = Int32.logand
   
@@ -70,9 +72,13 @@ module UInt32 = struct
     let raw = marshal x in
     blit raw 0 buf off 4;
     off + 4
-  let unmarshal (x: string) : t = match List.map Int32.of_int (_unmarshal x) with
-    | [ a; b; c; d ] -> (a << 24) || (b << 16) || (c << 8) || d
-    | _ -> raise Truncated
+  let unmarshal (x: Cstruct.t) : t =
+    if Cstruct.len x < 4 then raise Truncated;
+    let a = Int32.of_int (Cstruct.get_uint8 x 0) in
+    let b = Int32.of_int (Cstruct.get_uint8 x 1) in
+    let c = Int32.of_int (Cstruct.get_uint8 x 2) in
+    let d = Int32.of_int (Cstruct.get_uint8 x 3) in
+    (a lsl 24) || (b lsl 16) || (c lsl 8) || d
 	
   let prettyprint = string_of_int
   let to_int32 x = x
@@ -83,14 +89,14 @@ module UInt64 = struct
   type t = int64
 
   let (||) = Int64.logor
-  let (<<) = Int64.shift_left
+  let (lsl) = Int64.shift_left
   let (>>) = Int64.shift_right
   let (&&) = Int64.logand
 
   let marshal (x: t) : string = 
     _marshal (List.map Int64.to_int [ x >> 56; x >> 48; x >> 40; x >> 32; x >> 24; x >> 16; x >> 8; x ])
   let unmarshal (x: string) : t = match List.map Int64.of_int (_unmarshal x) with
-    | [ a; b; c; d; e; f; g; h ] -> (a << 56 ) || (b << 48) || (c << 40) || (d << 32) || (e << 24) || (f << 16) || (g << 8) || h
+    | [ a; b; c; d; e; f; g; h ] -> (a lsl 56 ) || (b lsl 48) || (c lsl 40) || (d lsl 32) || (e lsl 24) || (f lsl 16) || (g lsl 8) || h
     | _ -> raise Truncated
 
   let prettyprint = Int64.to_string
@@ -154,10 +160,10 @@ module SecurityType = struct
     FAILED;
     NOSECURITY;
     VNCAUTH
-  } as uint32_t 
+  } as uint32_t
 
   cstruct c {
-    ty: uint32_t
+    uint32_t ty
   } as little_endian
 
   let marshal (x: t) = match x with
@@ -166,11 +172,11 @@ module SecurityType = struct
     | VNCAuth -> UInt32.marshal 2l
 
   let unmarshal (s: Channel.t) = 
-    match code_of_int32 (get_c_ty (really_read s 4)) with
-    | FAILED -> Failed (Error.unmarshal s)
-    | NOSECURITY -> NoSecurity
-    | VNCAUTH -> VNCAuth    
-    | _ -> raise Unmarshal_failure  
+    match int_to_code (get_c_ty (really_read s 4)) with
+    | None -> `Error(Failure "unknown SecurityType")
+    | Some FAILED -> `Ok (Failed (Cstruct.to_string (Error.unmarshal s)))
+    | Some NOSECURITY -> `Ok NoSecurity
+    | Some VNCAUTH -> `Ok VNCAuth    
 end
 
 module ClientInit = struct
@@ -178,7 +184,7 @@ module ClientInit = struct
 
   let marshal (x: t) = if x then "x" else "\000"
   let unmarshal (s: Channel.t) = 
-    match (really_read s 1).[0] with
+    match Cstruct.get_char (really_read s 1) 0  with
     | '\000' -> false
     | _ -> true
 end
@@ -217,16 +223,16 @@ module PixelFormat = struct
       "   " (* padding *)
   let unmarshal (s: Channel.t) =
     let buf = really_read s 16 in
-    { bpp = int_of_char buf.[0];
-      depth = int_of_char buf.[1];
-      big_endian = buf.[2] <> '\000';
-      true_colour = buf.[3] <> '\000';
-      red_max = UInt16.unmarshal (String.sub buf 4 2);
-      green_max = UInt16.unmarshal (String.sub buf 6 2);
-      blue_max = UInt16.unmarshal (String.sub buf 8 2);
-      red_shift = int_of_char buf.[10];
-      green_shift = int_of_char buf.[11];
-      blue_shift = int_of_char buf.[12];
+    { bpp = int_of_char (Cstruct.get_char buf 0);
+      depth = int_of_char (Cstruct.get_char buf 1);
+      big_endian = Cstruct.get_char buf 2 <> '\000';
+      true_colour = Cstruct.get_char buf 3 <> '\000';
+      red_max = UInt16.unmarshal (Cstruct.sub buf 4 2);
+      green_max = UInt16.unmarshal (Cstruct.sub buf 6 2);
+      blue_max = UInt16.unmarshal (Cstruct.sub buf 8 2);
+      red_shift = int_of_char (Cstruct.get_char buf 10);
+      green_shift = int_of_char (Cstruct.get_char buf 11);
+      blue_shift = int_of_char (Cstruct.get_char buf 12);
       (* ignoring padding *)
     }
 end
@@ -283,11 +289,11 @@ module FramebufferUpdateRequest = struct
 
   let unmarshal (s: Channel.t) = 
     let buf = really_read s 9 in
-    { incremental = buf.[0] <> '\000';
-      x = UInt16.unmarshal (String.sub buf 1 2);
-      y = UInt16.unmarshal (String.sub buf 3 2);
-      width = UInt16.unmarshal (String.sub buf 5 2);
-      height = UInt16.unmarshal (String.sub buf 7 2);
+    { incremental = Cstruct.get_uint8 buf 0 <> 0;
+      x = UInt16.unmarshal (Cstruct.sub buf 1 2);
+      y = UInt16.unmarshal (Cstruct.sub buf 3 2);
+      width = UInt16.unmarshal (Cstruct.sub buf 5 2);
+      height = UInt16.unmarshal (Cstruct.sub buf 7 2);
     }
   let prettyprint (x: t) = 
     Printf.sprintf "FrameBufferUpdateRequest (incr=%b x=%d y=%d width=%d height=%d)" x.incremental x.x x.y x.width x.height
@@ -382,8 +388,8 @@ module KeyEvent = struct
 
   let unmarshal (s: Channel.t) = 
     let buf = really_read s 7 in
-    { down = buf.[0] <> '\000';
-      key = UInt32.unmarshal (String.sub buf 3 4) }
+    { down = Cstruct.get_uint8 buf 0 <> 0;
+      key = UInt32.unmarshal (Cstruct.sub buf 3 4) }
   let prettyprint (x: t) = 
     Printf.sprintf "KeyEvent { down = %b; key = %s }"
       x.down (Int32.to_string x.key)
@@ -394,9 +400,9 @@ module PointerEvent = struct
 
   let unmarshal (s: Channel.t) = 
     let buf = really_read s 5 in
-    { mask = int_of_char buf.[0];
-      x = UInt16.unmarshal (String.sub buf 1 2);
-      y = UInt16.unmarshal (String.sub buf 3 2);
+    { mask = Cstruct.get_uint8 buf 0;
+      x = UInt16.unmarshal (Cstruct.sub buf 1 2);
+      y = UInt16.unmarshal (Cstruct.sub buf 3 2);
     }
   let prettyprint (x: t) = 
     Printf.sprintf "PointerEvent { mask = %d; x = %d; y = %d }"
@@ -408,8 +414,8 @@ module ClientCutText = struct
 
   let unmarshal (s: Channel.t) = 
     let buf = really_read s 7 in
-    let length = UInt32.unmarshal (String.sub buf 3 4) in
-    really_read s (Int32.to_int length)
+    let length = UInt32.unmarshal (Cstruct.sub buf 3 4) in
+    Cstruct.to_string (really_read s (Int32.to_int length))
   let prettyprint (x: t) = 
     Printf.sprintf "ClientCutText { %s }" x
 end
@@ -432,7 +438,7 @@ module Request = struct
     | ClientCutText x -> ClientCutText.prettyprint x
 
   let unmarshal (s: Channel.t) = 
-    match int_of_char (really_read s 1).[0] with
+    match Cstruct.get_uint8 (really_read s 1) 0 with
     | 0 ->
 	SetPixelFormat (SetPixelFormat.unmarshal s)
     | 2 ->

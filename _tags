@@ -29,5 +29,5 @@
 <lib_test/*.ml{,i}>: pkg_unix
 <lib_test/*.ml{,i}>: pkg_cstruct
 # OASIS_STOP
-<*/*>: syntax_camlp4o
+<lib/*>: syntax_camlp4o
 <lib/*.ml{,i}>: pkg_cstruct.syntax
