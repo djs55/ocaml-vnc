@@ -27,3 +27,10 @@ Executable rfb_randomtest
   Path: lib_test
   MainIs: rfb_randomtest_main.ml
   BuildDepends: vnc,vnc.unix,threads
+
+Executable rotate
+  CompiledObject: best
+  Install: false
+  Path: lib_test
+  MainIs: rotate.ml
+  BuildDepends: vnc,vnc.unix,threads
