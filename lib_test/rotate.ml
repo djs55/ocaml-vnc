@@ -87,12 +87,52 @@ let raster t f =
     done
   done
 
+let clear d =
+  for y = 0 to h - 1 do
+    for x = 0 to w - 1 do
+      d.(y * w + x) <- 0x0
+    done
+  done
+
+let plot f t =
+  let d = get_update_buffer () in
+  clear d;
+  let c' = float_of_int (h / 2) /. 2. in
+  for x = 0 to w - 1 do
+    let y = int_of_float (f t (float_of_int x /. (float_of_int w)) *. c' +. (float_of_int (h / 2)))  in
+    d.(y * w + x) <- 0xffffff
+  done
+
+let pi = 4. *. atan 1.
+
+let sinusoid =
+  let c = 2. *. pi in
+  fun t x ->
+    sin ((x +. t) *. c)
+
+let plot2 f t =
+  let d = get_update_buffer () in
+  clear d;
+  for i = 0 to 4000 do
+    d.(f t (float_of_int i /. 4000.)) <- 0xffffff
+  done
+ 
+let test =
+  let c = 2. *. pi in
+  let w_size = float_of_int w *. 0.4 in
+  let h_size = float_of_int h *. 0.4 in
+  fun t i ->
+    let x = int_of_float (sin ((0.1 *. t +. i) *. c) *. w_size +. (float_of_int (w/2))) in
+    let y = int_of_float (cos ((0.1 *. t +. 4. *. i) *. c) *. h_size +. (float_of_int (h/2))) in
+    y * w + x
+
+
 let animate fps f =
   let epoch_start = Unix.gettimeofday () in
   let ideal_delay = 1. /. fps in
   while true do
     let start = Unix.gettimeofday () in (* TODO: use monotonic clock *)
-    raster (start -. epoch_start) f;
+    f (start -. epoch_start);
     switch ();
     post_update ();
     let took = Unix.gettimeofday () -. start in
@@ -107,14 +147,14 @@ let server (s: Unix.file_descr) =
   let last_update_seen = ref !update_counter in
   while true do
     let req = Request.unmarshal s in
-    print_endline ("<- " ^ (Request.prettyprint req));
+    (* print_endline ("<- " ^ (Request.prettyprint req)); *)
     match req with
     | Request.SetPixelFormat pf ->
 	bpp := pf.PixelFormat.bpp;
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = true } ->
       last_update_seen := wait_update !last_update_seen;
       let update = make_update !bpp in
-      print_endline ("-> " ^ (FramebufferUpdate.prettyprint update));
+      (* print_endline ("-> " ^ (FramebufferUpdate.prettyprint update)); *)
       Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ])
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false } ->
       let update = make_update !bpp in
@@ -135,7 +175,7 @@ let _ =
   end in
   Printf.printf "Listening on local port %d\n" port; flush stdout;
   Unix.handle_unix_error (Unix.listen s) 5;
-  let _ = Thread.create (animate 50.) hatch in
+  let _ = Thread.create (animate 50.) (plot2 test) in
   let fd, _ = Unix.accept s in
   server fd
 
