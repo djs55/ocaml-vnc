@@ -69,24 +69,30 @@ let make_update bpp =
   { FramebufferUpdate.x = 0; y = 0; w = w; h = h;
     encoding = FramebufferUpdate.Encoding.Raw raw }
 
-let redraw t =
+let square t x y =
+  if x < 100 || x > 540 || y < 100 || y > 380
+  then 0
+  else 0xffffff
+
+let hatch t x y =
+  if ((x / 32) + (y / 32)) mod 2 = 0
+  then 0x666666
+  else 0xbbbbbb
+
+let raster t f =
   let d = get_update_buffer () in
   for y = 0 to h - 1 do
     for x = 0 to w - 1 do
-      let colour =
-        if x < 100 || x > 540 || y < 100 || y > 380
-        then 0
-        else 0xffffff in
-      d.(y * w + x) <- colour
+      d.(y * w + x) <- f t x y
     done
   done
 
-let animate fps =
+let animate fps f =
   let epoch_start = Unix.gettimeofday () in
   let ideal_delay = 1. /. fps in
   while true do
     let start = Unix.gettimeofday () in (* TODO: use monotonic clock *)
-    redraw (start -. epoch_start);
+    raster (start -. epoch_start) f;
     switch ();
     post_update ();
     let took = Unix.gettimeofday () -. start in
@@ -129,7 +135,7 @@ let _ =
   end in
   Printf.printf "Listening on local port %d\n" port; flush stdout;
   Unix.handle_unix_error (Unix.listen s) 5;
-  let _ = Thread.create animate 50. in
+  let _ = Thread.create (animate 50.) hatch in
   let fd, _ = Unix.accept s in
   server fd
 
