@@ -34,3 +34,10 @@ Executable rotate
   Path: lib_test
   MainIs: rotate.ml
   BuildDepends: vnc,vnc.unix,threads
+
+Executable framebuffer
+  CompiledObject: best
+  Install: false
+  Path: lib_test
+  MainIs: framebuffer.ml
+  BuildDepends: vnc,vnc.unix,pcf,pcf.unix,threads
