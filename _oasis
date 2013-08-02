@@ -21,6 +21,13 @@ Library vnc_unix
   Findlibparent: vnc
   BuildDepends: unix
 
+Library vnc_lwt
+  Path: lib
+  Modules: Rfb_lwt
+  Findlibname: lwt
+  Findlibparent: vnc
+  BuildDepends: lwt.unix
+
 Executable rfb_randomtest
   CompiledObject: best
   Install: false
@@ -40,4 +47,4 @@ Executable framebuffer
   Install: false
   Path: lib_test
   MainIs: framebuffer.ml
-  BuildDepends: vnc,vnc.unix,pcf,pcf.unix,threads
+  BuildDepends: vnc,vnc.lwt,pcf,pcf.unix,lwt,lwt.unix

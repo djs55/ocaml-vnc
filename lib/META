@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 878ad6fba4edc52abb306f498e843436)
+# DO NOT EDIT (digest: 77a138502fe14049449ce8d9fc5f6624)
 version = "0.0.1"
 description = "Pure OCaml implementation of the RFB protocol as used in VNC"
 requires = "cstruct"
@@ -17,6 +17,17 @@ package "unix" (
  archive(native) = "vnc_unix.cmxa"
  archive(native, plugin) = "vnc_unix.cmxs"
  exists_if = "vnc_unix.cma"
+)
+
+package "lwt" (
+ version = "0.0.1"
+ description = "Pure OCaml implementation of the RFB protocol as used in VNC"
+ requires = "lwt.unix"
+ archive(byte) = "vnc_lwt.cma"
+ archive(byte, plugin) = "vnc_lwt.cma"
+ archive(native) = "vnc_lwt.cmxa"
+ archive(native, plugin) = "vnc_lwt.cmxs"
+ exists_if = "vnc_lwt.cma"
 )
 # OASIS_STOP
 

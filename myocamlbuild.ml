@@ -1,5 +1,5 @@
 (* OASIS_START *)
-(* DO NOT EDIT (digest: 4573a7bd1c70f86b1b8a3d683b2ddd38) *)
+(* DO NOT EDIT (digest: 7988ccd36036ebc9478f2d657a5f5519) *)
 module OASISGettext = struct
 (* # 21 "/home/djs/.opam/4.00.1/build/oasis.0.3.0/src/oasis/OASISGettext.ml" *)
 
@@ -477,7 +477,8 @@ end
 open Ocamlbuild_plugin;;
 let package_default =
   {
-     MyOCamlbuildBase.lib_ocaml = [("vnc", ["lib"]); ("vnc_unix", ["lib"])];
+     MyOCamlbuildBase.lib_ocaml =
+       [("vnc", ["lib"]); ("vnc_unix", ["lib"]); ("vnc_lwt", ["lib"])];
      lib_c = [];
      flags = [];
      includes = [("lib_test", ["lib"])];
@@ -486,6 +487,6 @@ let package_default =
 
 let dispatch_default = MyOCamlbuildBase.dispatch_default package_default;;
 
-# 490 "myocamlbuild.ml"
+# 491 "myocamlbuild.ml"
 (* OASIS_STOP *)
 Ocamlbuild_plugin.dispatch dispatch_default;;

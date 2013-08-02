@@ -104,11 +104,20 @@ module UInt64 = struct
   let of_int64 x = x
 end
 
-module type CHANNEL = sig
-  type t
+module type ASYNC = sig
+  type 'a t
 
-  val really_read: t -> int -> Cstruct.t
-  val really_write: t -> string -> unit
+  val (>>=): 'a t -> ('a -> 'b t) -> 'b t
+  val return: 'a -> 'a t
+end
+
+module type CHANNEL = sig
+  include ASYNC
+
+  type fd
+
+  val really_read: fd -> int -> Cstruct.t t
+  val really_write: fd -> string -> unit t
 end
 
 module Make = functor(Channel: CHANNEL) -> struct
@@ -124,14 +133,14 @@ module ProtocolVersion = struct
     x' >= prefix' && (String.sub x 0 prefix' = prefix)
 
   let marshal (x: t) = Printf.sprintf "RFB %03x.%03x\n" x.major x.minor
-  let unmarshal (s: Channel.t) = 
-    let x = really_read s 12 in
+  let unmarshal (s: Channel.fd) = 
+    really_read s 12 >>= fun x ->
     let rfb = Cstruct.(to_string (sub x 0 4)) in
     if rfb <> "RFB "
     then raise Unmarshal_failure;
     let major = int_of_string (Cstruct.(to_string (sub x 4 3))) in
     let minor = int_of_string (Cstruct.(to_string (sub x 8 3))) in
-    { major = major; minor = minor }
+    return { major = major; minor = minor }
 
   let prettyprint (x: t) = 
     Printf.sprintf "ProtocolVersion major = %d minor = %d" x.major x.minor
@@ -145,8 +154,9 @@ module Error = struct
   } as little_endian
 
   let marshal (x: t) = UInt32.marshal (Int32.of_int (String.length x)) ^ x
-  let unmarshal (s: Channel.t) = 
-    let len = get_c_length (really_read s 4) in
+  let unmarshal (s: Channel.fd) =
+    really_read s 4 >>= fun x ->
+    let len = get_c_length x in
     really_read s (Int32.to_int len)
 end
 
@@ -171,22 +181,26 @@ module SecurityType = struct
     | NoSecurity -> UInt32.marshal 1l
     | VNCAuth -> UInt32.marshal 2l
 
-  let unmarshal (s: Channel.t) = 
-    match int_to_code (get_c_ty (really_read s 4)) with
-    | None -> `Error(Failure "unknown SecurityType")
-    | Some FAILED -> `Ok (Failed (Cstruct.to_string (Error.unmarshal s)))
-    | Some NOSECURITY -> `Ok NoSecurity
-    | Some VNCAUTH -> `Ok VNCAuth    
+  let unmarshal (s: Channel.fd) =
+    really_read s 4 >>= fun x -> 
+    match int_to_code (get_c_ty x) with
+    | None -> return (`Error(Failure "unknown SecurityType"))
+    | Some FAILED ->
+      Error.unmarshal s >>= fun x ->
+      return (`Ok (Failed (Cstruct.to_string x)))
+    | Some NOSECURITY -> return (`Ok NoSecurity)
+    | Some VNCAUTH -> return (`Ok VNCAuth)
 end
 
 module ClientInit = struct
   type t = bool (* shared-flag *)
 
   let marshal (x: t) = if x then "x" else "\000"
-  let unmarshal (s: Channel.t) = 
-    match Cstruct.get_char (really_read s 1) 0  with
+  let unmarshal (s: Channel.fd) =
+    really_read s 1 >>= fun x ->
+    return (match Cstruct.get_char x 0  with
     | '\000' -> false
-    | _ -> true
+    | _ -> true)
 end
 
 module PixelFormat = struct
@@ -221,9 +235,9 @@ module PixelFormat = struct
     bpp ^ depth ^ big_endian ^ true_colour ^ 
       red_max ^ green_max ^ blue_max ^ red_shift ^ green_shift ^ blue_shift ^
       "   " (* padding *)
-  let unmarshal (s: Channel.t) =
-    let buf = really_read s 16 in
-    { bpp = int_of_char (Cstruct.get_char buf 0);
+  let unmarshal (s: Channel.fd) =
+    really_read s 16 >>= fun buf ->
+    return { bpp = int_of_char (Cstruct.get_char buf 0);
       depth = int_of_char (Cstruct.get_char buf 1);
       big_endian = Cstruct.get_char buf 2 <> '\000';
       true_colour = Cstruct.get_char buf 3 <> '\000';
@@ -257,8 +271,8 @@ module SetPixelFormat = struct
     let padding = "\000\000\000" in
     ty ^ padding ^ (PixelFormat.marshal x)
 
-  let unmarshal (s: Channel.t) =
-    ignore(really_read s 3);
+  let unmarshal (s: Channel.fd) =
+    really_read s 3 >>= fun _ ->
     PixelFormat.unmarshal s
 
   let prettyprint (x: t) = 
@@ -269,14 +283,18 @@ end
 module SetEncodings = struct
   type t = UInt32.t list
 
-  let unmarshal (s: Channel.t) = 
-    ignore(really_read s 1); (* padding *)
-    let num = UInt16.unmarshal (really_read s 2) in
+  let unmarshal (s: Channel.fd) =
+    really_read s 1 >>= fun _ -> (* padding *)
+    really_read s 2 >>= fun num ->
+    let num = UInt16.unmarshal num in
     let encodings = ref [] in
-    for i = 1 to num do
-      encodings := UInt32.unmarshal (really_read s 4) :: !encodings
-    done;
-    List.rev !encodings
+    let rec loop acc n =
+      if n > num
+      then return (List.rev acc)
+      else
+        really_read s 4 >>= fun x ->
+        loop (UInt32.unmarshal x :: acc) (n + 1) in
+    loop [] 1
 
   let prettyprint (x: t) = 
     Printf.sprintf "SetEncodings (num=%d)" (List.length x)
@@ -287,9 +305,9 @@ module FramebufferUpdateRequest = struct
 	     x: int; y: int;
 	     width: int; height: int }
 
-  let unmarshal (s: Channel.t) = 
-    let buf = really_read s 9 in
-    { incremental = Cstruct.get_uint8 buf 0 <> 0;
+  let unmarshal (s: Channel.fd) = 
+    really_read s 9 >>= fun buf ->
+    return { incremental = Cstruct.get_uint8 buf 0 <> 0;
       x = UInt16.unmarshal (Cstruct.sub buf 1 2);
       y = UInt16.unmarshal (Cstruct.sub buf 3 2);
       width = UInt16.unmarshal (Cstruct.sub buf 5 2);
@@ -391,9 +409,9 @@ end
 module KeyEvent = struct
   type t = { down: bool; key: UInt32.t }
 
-  let unmarshal (s: Channel.t) = 
-    let buf = really_read s 7 in
-    { down = Cstruct.get_uint8 buf 0 <> 0;
+  let unmarshal (s: Channel.fd) =
+    really_read s 7 >>= fun buf ->
+    return { down = Cstruct.get_uint8 buf 0 <> 0;
       key = UInt32.unmarshal (Cstruct.sub buf 3 4) }
   let prettyprint (x: t) = 
     Printf.sprintf "KeyEvent { down = %b; key = %s }"
@@ -403,9 +421,9 @@ end
 module PointerEvent = struct
   type t = { mask: int; x: int; y: int }
 
-  let unmarshal (s: Channel.t) = 
-    let buf = really_read s 5 in
-    { mask = Cstruct.get_uint8 buf 0;
+  let unmarshal (s: Channel.fd) =
+    really_read s 5 >>= fun buf ->
+    return { mask = Cstruct.get_uint8 buf 0;
       x = UInt16.unmarshal (Cstruct.sub buf 1 2);
       y = UInt16.unmarshal (Cstruct.sub buf 3 2);
     }
@@ -417,10 +435,11 @@ end
 module ClientCutText = struct
   type t = string
 
-  let unmarshal (s: Channel.t) = 
-    let buf = really_read s 7 in
+  let unmarshal (s: Channel.fd) =
+    really_read s 7 >>= fun buf -> 
     let length = UInt32.unmarshal (Cstruct.sub buf 3 4) in
-    Cstruct.to_string (really_read s (Int32.to_int length))
+    really_read s (Int32.to_int length) >>= fun buf ->
+    return (Cstruct.to_string buf)
   let prettyprint (x: t) = 
     Printf.sprintf "ClientCutText { %s }" x
 end
@@ -442,20 +461,27 @@ module Request = struct
     | PointerEvent x -> PointerEvent.prettyprint x
     | ClientCutText x -> ClientCutText.prettyprint x
 
-  let unmarshal (s: Channel.t) = 
-    match Cstruct.get_uint8 (really_read s 1) 0 with
+  let unmarshal (s: Channel.fd) =
+    really_read s 1 >>= fun x ->
+    match Cstruct.get_uint8 x 0 with
     | 0 ->
-	SetPixelFormat (SetPixelFormat.unmarshal s)
+        SetPixelFormat.unmarshal s >>= fun x ->
+	return (SetPixelFormat x)
     | 2 ->
-	SetEncodings (SetEncodings.unmarshal s)
+        SetEncodings.unmarshal s >>= fun x ->
+	return (SetEncodings x)
     | 3 ->
-	FrameBufferUpdateRequest (FramebufferUpdateRequest.unmarshal s)
+        FramebufferUpdateRequest.unmarshal s >>= fun x ->
+	return (FrameBufferUpdateRequest x)
     | 4 ->
-	KeyEvent (KeyEvent.unmarshal s)
+        KeyEvent.unmarshal s >>= fun x ->
+	return (KeyEvent x)
     | 5 ->
-	PointerEvent (PointerEvent.unmarshal s)
+        PointerEvent.unmarshal s >>= fun x ->
+	return (PointerEvent x)
     | 6 ->
-	ClientCutText (ClientCutText.unmarshal s)
+        ClientCutText.unmarshal s >>= fun x ->
+	return (ClientCutText x)
     | x ->
 	failwith (Printf.sprintf "Unknown message type: %d" x)
 end
@@ -464,13 +490,13 @@ end
 let white = (255, 255, 255)
 let black = (0, 0, 0)
 
-let handshake w h (s: Channel.t) =
+let handshake w h (s: Channel.fd) =
   let ver = { ProtocolVersion.major = 3; minor = 3 } in
   really_write s (ProtocolVersion.marshal ver);
-  let ver' = ProtocolVersion.unmarshal s in
+  ProtocolVersion.unmarshal s >>= fun ver' ->
   print_endline (ProtocolVersion.prettyprint ver');
   really_write s (SecurityType.marshal SecurityType.NoSecurity);
-  let ci = ClientInit.unmarshal s in
+  ClientInit.unmarshal s >>= fun ci ->
   if ci then print_endline "Client requests a shared display"
   else print_endline "Client requests a non-shared display";
   let si = { ServerInit.name = "dave's desktop";

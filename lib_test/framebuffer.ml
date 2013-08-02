@@ -12,8 +12,9 @@
  * GNU Lesser General Public License for more details.
  *)
 open Rfb
+open Lwt
 
-module Server = Rfb.Make(Rfb_unix)
+module Server = Rfb.Make(Rfb_lwt)
 open Server
 
 let w = 640
@@ -125,55 +126,58 @@ let make_full_update bpp console font =
 
 
 let console = ref (Console.make 0 0)
-let console_m = Mutex.create ()
-let console_c = Condition.create ()
+let console_m = Lwt_mutex.create ()
+let console_c = Lwt_condition.create ()
 let update_console f =
-  Mutex.lock console_m;
-  console := f !console;
-  Condition.broadcast console_c;
-  Mutex.unlock console_m
+  Lwt_mutex.with_lock console_m
+    (fun () ->
+      console := f !console;
+      Lwt_condition.broadcast console_c ();
+      return ()
+    )
 let wait_for_update c =
-  Mutex.lock console_m;
-  while !console = c do Condition.wait console_c console_m done;
-  let result = !console in
-  Mutex.unlock console_m;
-  result
+  Lwt_mutex.with_lock console_m
+    (fun () ->
+      lwt () = while_lwt !console = c do Lwt_condition.wait console_c ~mutex:console_m done in
+      return !console
+    )
 
-
-let server (s: Unix.file_descr) font = 
-  Server.handshake w h s;
+let server (s: Lwt_unix.file_descr) font = 
+  lwt () = Server.handshake w h s in
 
   let bpp = ref 32 in
   let c = ref (Console.make 0 0) in
 
-  while true do
-    let req = Request.unmarshal s in
+  while_lwt true do
+    lwt req = Request.unmarshal s in
     print_endline ("<- " ^ (Request.prettyprint req));
     match req with
     | Request.SetPixelFormat pf ->
 	bpp := pf.PixelFormat.bpp;
+        return ()
     | Request.KeyEvent { KeyEvent.down = false; key = key } ->
         update_console
           (fun c ->
             Console.output_char c (char_of_int (Int32.to_int key))
           )
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = true } ->
-Thread.delay 0.5;
+      lwt () = Lwt_unix.sleep 0.5 in
 (*      c := wait_for_update !c; *)
       c := !console;
       let update = make_full_update !bpp !c font in
       (* print_endline ("-> " ^ (FramebufferUpdate.prettyprint update)); *)
-      Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ])
+      Rfb_lwt.really_write s (FramebufferUpdate.marshal [ update ])
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false } ->
       c := !console;
       let update = make_full_update !bpp !c font in
       print_endline ("-> " ^ (FramebufferUpdate.prettyprint update));
-      Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ]);
+      Rfb_lwt.really_write s (FramebufferUpdate.marshal [ update ]);
     | _ ->
 	print_endline "<- ^^ ignoring";
+        return ()
   done
   
-let _ = 
+let main () = 
   if Array.length Sys.argv <> 2 then begin
     Printf.fprintf stderr "Usage:\n";
     Printf.fprintf stderr " %s <PCF font file>\n" Sys.argv.(0);
@@ -198,15 +202,16 @@ let _ =
   Console.dump !console;
 
   let port = 5902 in
-  let s = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-  Unix.handle_unix_error (Unix.setsockopt s Unix.SO_REUSEADDR) true;
-  Unix.handle_unix_error (Unix.bind s) (Unix.ADDR_INET (Unix.inet_addr_any, port));
-  let port = begin match Unix.getsockname s with
+  let s = Lwt_unix.socket Lwt_unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.handle_unix_error (Unix.setsockopt (Lwt_unix.unix_file_descr s) Unix.SO_REUSEADDR) true;
+  Lwt_unix.bind s (Lwt_unix.ADDR_INET (Unix.inet_addr_any, port));
+  let port = begin match Lwt_unix.getsockname s with
     | Unix.ADDR_INET(_, port) -> port
     | _ -> failwith "Failed to discover local port"
   end in
   Printf.printf "Listening on local port %d\n" port; flush stdout;
-  Unix.handle_unix_error (Unix.listen s) 5;
-  let fd, _ = Unix.accept s in
-  server fd font
+  Lwt_unix.listen s 5;
+  lwt x = Lwt_unix.accept s in
+  server (fst x) font
 
+let _ = Lwt_main.run (main ())

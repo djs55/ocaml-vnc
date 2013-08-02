@@ -1,5 +1,5 @@
 # OASIS_START
-# DO NOT EDIT (digest: 6834bff83e14677140c533cad489bd51)
+# DO NOT EDIT (digest: 74d49f545782f5b410a17f6f926606e6)
 # Ignore VCS directories, you can use the same kind of rule outside 
 # OASIS_START/STOP if you want to exclude directories that contains 
 # useless stuff for the build process
@@ -19,6 +19,9 @@
 # Library vnc_unix
 "lib/vnc_unix.cmxs": use_vnc_unix
 <lib/*.ml{,i}>: pkg_unix
+# Library vnc_lwt
+"lib/vnc_lwt.cmxs": use_vnc_lwt
+<lib/*.ml{,i}>: pkg_lwt.unix
 # Executable rfb_randomtest
 <lib_test/rfb_randomtest_main.{native,byte}>: use_vnc
 <lib_test/rfb_randomtest_main.{native,byte}>: use_vnc_unix
@@ -31,21 +34,27 @@
 <lib_test/rotate.{native,byte}>: pkg_threads
 <lib_test/rotate.{native,byte}>: pkg_unix
 <lib_test/rotate.{native,byte}>: pkg_cstruct
-# Executable framebuffer
-<lib_test/framebuffer.{native,byte}>: use_vnc
-<lib_test/framebuffer.{native,byte}>: use_vnc_unix
-<lib_test/framebuffer.{native,byte}>: pkg_pcf
-<lib_test/framebuffer.{native,byte}>: pkg_pcf.unix
-<lib_test/framebuffer.{native,byte}>: pkg_threads
-<lib_test/framebuffer.{native,byte}>: pkg_unix
-<lib_test/framebuffer.{native,byte}>: pkg_cstruct
-<lib_test/*.ml{,i}>: use_vnc
 <lib_test/*.ml{,i}>: use_vnc_unix
-<lib_test/*.ml{,i}>: pkg_pcf
-<lib_test/*.ml{,i}>: pkg_pcf.unix
 <lib_test/*.ml{,i}>: pkg_threads
 <lib_test/*.ml{,i}>: pkg_unix
+# Executable framebuffer
+<lib_test/framebuffer.{native,byte}>: use_vnc
+<lib_test/framebuffer.{native,byte}>: use_vnc_lwt
+<lib_test/framebuffer.{native,byte}>: pkg_pcf
+<lib_test/framebuffer.{native,byte}>: pkg_pcf.unix
+<lib_test/framebuffer.{native,byte}>: pkg_lwt
+<lib_test/framebuffer.{native,byte}>: pkg_lwt.unix
+<lib_test/framebuffer.{native,byte}>: pkg_cstruct
+<lib_test/*.ml{,i}>: use_vnc
+<lib_test/*.ml{,i}>: use_vnc_lwt
+<lib_test/*.ml{,i}>: pkg_pcf
+<lib_test/*.ml{,i}>: pkg_pcf.unix
+<lib_test/*.ml{,i}>: pkg_lwt
+<lib_test/*.ml{,i}>: pkg_lwt.unix
 <lib_test/*.ml{,i}>: pkg_cstruct
 # OASIS_STOP
 <lib/*>: syntax_camlp4o
+<lib_test/framebuffer.ml>: syntax_camlp4o
 <lib/*.ml{,i}>: pkg_cstruct.syntax
+<lib_test/framebuffer.ml>: pkg_lwt.syntax
+<lib/rfb_lwt.ml>: pkg_lwt.syntax
