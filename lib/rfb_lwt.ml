@@ -32,13 +32,20 @@ let really_read fd n =
   let result = Cstruct.create n in
   Cstruct.blit_from_string buf 0 result 0 n;
   return result
-let really_write fd buf = 
+let really_write fd buf =
 (*
-  Printf.printf "About to write %d bytes [ %s ]\n"
-    (String.length buf) (String.concat " " (List.map (fun x -> Printf.sprintf "%02x" (int_of_char x)) (String.explode buf))); 
-(*Unix.sleep 2; *)
+  Printf.printf "About to write %d bytes\n" (String.length buf);
+  let buf' = String.length buf in
+  if buf' < (16 * 10) then begin
+    let c = Cstruct.create buf' in
+    Cstruct.blit_from_string buf 0 c 0 buf';
+    Cstruct.hexdump c;
+  end;
 *)
-  lwt len = Lwt_unix.write fd buf 0 (String.length buf) in
-  if len <> String.length buf then raise End_of_file;
+  let rec rwrite fd buf ofs len =
+    lwt n = Lwt_unix.write fd buf ofs len in
+    if n = 0 then raise End_of_file;
+    if n < len then rwrite fd buf (ofs + n) (len - n) else return () in
+  lwt () = rwrite fd buf 0 (String.length buf) in
   return ()
 
