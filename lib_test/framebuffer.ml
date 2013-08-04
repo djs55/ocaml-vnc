@@ -87,43 +87,54 @@ let width_of_font font =
   let a = get_accelerator font in
   a.Accelerator.min_bounds.Metrics.character_width
 
-let make_full_update bpp console font =
-  (* Update the whole thing *)
+let write_raw_char bpp console font c =
   let font_width = width_of_font font in
   let font_height = height_of_font font in
   let bytes_per_pixel = bpp / 8 in
-  let buffer = String.create (w * h * bytes_per_pixel) in
-  let bytes_per_line = w * bytes_per_pixel in
+  let buffer = String.create (font_width * font_height * bytes_per_pixel) in
+  let e = Pcf.Encoding.of_int c in
+  let pixels = match Pcf.Glyph.get_bitmap font e with
+  | Some pixels -> pixels
+  | None ->
+    (* unusual to have a character but not glyph (provided
+       the font is decent) *)
+    Array.init font_height (fun _ -> Array.create font_width false) in
+  Array.iteri
+    (fun row row_data ->
+      Array.iteri
+        (fun col pixel ->
+          let ofs = (row * font_width + col) * bytes_per_pixel in
+          let c = if pixel then 0xffffff else 0x0 in
+          buffer.[ofs + 0] <- char_of_int (c lsr 16);
+          buffer.[ofs + 1] <- char_of_int ((c lsr 8) land 0xff);
+          buffer.[ofs + 2] <- char_of_int (c land 0xff);
+          if bytes_per_pixel = 32
+          then buffer.[ofs + 3] <- char_of_int 0
+        ) row_data
+    ) pixels;
+  let raw = { FramebufferUpdate.Raw.buffer = buffer } in
+  { FramebufferUpdate.x = 0; y = 0; w = font_width; h = font_height;
+    encoding = FramebufferUpdate.Encoding.Raw raw }
+
+let make_full_update bpp console font =
+  let updates = ref [] in
+  let font_width = width_of_font font in
+  let font_height = height_of_font font in
   for row = 0 to console.Console.rows - 1 do
     for col = 0 to console.Console.cols - 1 do
       try
         let c = CoordMap.find (row, col) console.Console.chars in
-        let e = Pcf.Encoding.of_int c in
-        match Pcf.Glyph.get_bitmap font e with
-        | None -> ()
-        | Some pixels ->
-          Array.iteri
-            (fun row' row_data ->
-              Array.iteri
-                (fun col' pixel ->
-                  let y = row * font_height + row' in
-                  let x = col * font_width + col' in
-                  let ofs = y * bytes_per_line + x * bytes_per_pixel in
-                  let c = if pixel then 0xffffff else 0x0 in
-                  buffer.[ofs + 0] <- char_of_int (c lsr 16);
-                  buffer.[ofs + 1] <- char_of_int ((c lsr 8) land 0xff);
-                  buffer.[ofs + 2] <- char_of_int (c land 0xff);
-                  if bytes_per_pixel = 32
-                  then buffer.[ofs + 3] <- char_of_int 0
-                ) row_data
-            ) pixels
-      with Not_found -> ()
+        let update = write_raw_char bpp console font c in
+        let x = col * font_width in
+        let y = row * font_height in
+        let update = { update with FramebufferUpdate.x = x; y = y } in
+        updates := update :: !updates
+      with Not_found ->
+        (* probably need an empty character here *)
+        ()
     done
   done;
-  let raw = { FramebufferUpdate.Raw.buffer = buffer } in
-  { FramebufferUpdate.x = 0; y = 0; w = w; h = h;
-    encoding = FramebufferUpdate.Encoding.Raw raw }
-
+  !updates
 
 let console = ref (Console.make 0 0)
 let console_m = Lwt_mutex.create ()
@@ -156,7 +167,7 @@ let server (s: Lwt_unix.file_descr) font =
       Lwt_mutex.with_lock m
         (fun () ->
           let update = make_full_update !bpp new_console font in
-          lwt () = Rfb_lwt.really_write s (FramebufferUpdate.marshal [ update ]) in
+          lwt () = Rfb_lwt.really_write s (FramebufferUpdate.marshal update) in
           client_remembers := new_console;
           return ()
         )
@@ -189,8 +200,11 @@ let server (s: Lwt_unix.file_descr) font =
       let c = !console in
       let update = make_full_update !bpp c font in
       client_remembers := c;
-      print_endline ("-> " ^ (FramebufferUpdate.prettyprint update));
-      Rfb_lwt.really_write s (FramebufferUpdate.marshal [ update ]);
+      List.iter
+        (fun x ->
+          print_endline ("-> " ^ (FramebufferUpdate.prettyprint x));
+        ) update;
+      Rfb_lwt.really_write s (FramebufferUpdate.marshal update);
     | _ ->
 	print_endline "<- ^^ ignoring";
         return ()
