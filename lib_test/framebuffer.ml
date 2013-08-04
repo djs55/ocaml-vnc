@@ -112,23 +112,33 @@ let write_raw_char bpp console font c =
           then buffer.[ofs + 3] <- char_of_int 0
         ) row_data
     ) pixels;
-  let raw = { FramebufferUpdate.Raw.buffer = buffer } in
-  { FramebufferUpdate.x = 0; y = 0; w = font_width; h = font_height;
-    encoding = FramebufferUpdate.Encoding.Raw raw }
+  FramebufferUpdate.Encoding.Raw { FramebufferUpdate.Raw.buffer = buffer }
 
 let make_full_update bpp console font =
   let updates = ref [] in
+  let painted_already = Hashtbl.create 128 in
   let font_width = width_of_font font in
   let font_height = height_of_font font in
   for row = 0 to console.Console.rows - 1 do
     for col = 0 to console.Console.cols - 1 do
+      let open FramebufferUpdate in
       try
         let c = CoordMap.find (row, col) console.Console.chars in
-        let update = write_raw_char bpp console font c in
+        let encoding =
+          if Hashtbl.mem painted_already c then begin
+            let previous = Hashtbl.find painted_already c in
+            Encoding.CopyRect {
+              CopyRect.x = previous.FramebufferUpdate.x;
+              CopyRect.y = previous.FramebufferUpdate.y;
+            }
+          end else write_raw_char bpp console font c in
         let x = col * font_width in
         let y = row * font_height in
-        let update = { update with FramebufferUpdate.x = x; y = y } in
-        updates := update :: !updates
+        let update = {
+          x; y; w = font_width; h = font_height; encoding;
+        } in
+        updates := update :: !updates;
+        Hashtbl.replace painted_already c update
       with Not_found ->
         (* probably need an empty character here *)
         ()
