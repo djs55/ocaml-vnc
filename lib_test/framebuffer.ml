@@ -146,10 +146,25 @@ let server (s: Lwt_unix.file_descr) font =
   lwt () = Server.handshake w h s in
 
   let bpp = ref 32 in
-  let c = ref (Console.make 0 0) in
+  let client_remembers = ref (Console.make 0 0) in
+  let m = Lwt_mutex.create () in
+  let framebuffer_thread = ref None in
+
+  let framebuffer_thread_body () =
+    while_lwt true do
+      lwt new_console = wait_for_update !client_remembers in
+      Lwt_mutex.with_lock m
+        (fun () ->
+          let update = make_full_update !bpp new_console font in
+          lwt () = Rfb_lwt.really_write s (FramebufferUpdate.marshal [ update ]) in
+          client_remembers := new_console;
+          return ()
+        )
+     done in
 
   while_lwt true do
     lwt req = Request.unmarshal s in
+    Lwt_mutex.with_lock m (fun () ->
     print_endline ("<- " ^ (Request.prettyprint req));
     match req with
     | Request.SetPixelFormat pf ->
@@ -157,25 +172,29 @@ let server (s: Lwt_unix.file_descr) font =
 	bpp := pf.PixelFormat.bpp;
         return ()
     | Request.KeyEvent { KeyEvent.down = false; key = key } ->
-        update_console
-          (fun c ->
-            Console.output_char c (char_of_int (Int32.to_int key))
-          )
+        (try_lwt
+          let code = char_of_int (Int32.to_int key) in
+          update_console
+            (fun c ->
+              Console.output_char c code
+            )
+        with _ ->
+          Printf.printf "Ignoring keycode: %lx\n%!" key;
+          return ())
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = true } ->
-      lwt () = Lwt_unix.sleep 0.5 in
-(*      c := wait_for_update !c; *)
-      c := !console;
-      let update = make_full_update !bpp !c font in
-      (* print_endline ("-> " ^ (FramebufferUpdate.prettyprint update)); *)
-      Rfb_lwt.really_write s (FramebufferUpdate.marshal [ update ])
+      if !framebuffer_thread = None
+      then framebuffer_thread := Some (framebuffer_thread_body ());
+      return ()
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false } ->
-      c := !console;
-      let update = make_full_update !bpp !c font in
+      let c = !console in
+      let update = make_full_update !bpp c font in
+      client_remembers := c;
       print_endline ("-> " ^ (FramebufferUpdate.prettyprint update));
       Rfb_lwt.really_write s (FramebufferUpdate.marshal [ update ]);
     | _ ->
 	print_endline "<- ^^ ignoring";
         return ()
+    )
   done
   
 let main () = 
@@ -200,7 +219,15 @@ let main () =
 
   let c = Console.make rows cols in
   console := Console.output_string c "hello world\n";
-  Console.dump !console;
+  let _ =
+    while_lwt true do
+      lwt () = Lwt_unix.sleep 0.25 in
+      let t = "all work and no play makes Dave a dull boy. " in
+      for_lwt i = 0 to String.length t - 1 do
+        lwt () = Lwt_unix.sleep 0.1 in
+        update_console (fun c -> Console.output_char c t.[i])
+      done
+    done in
 
   let port = 5902 in
   let s = Lwt_unix.socket Lwt_unix.PF_INET Unix.SOCK_STREAM 0 in
