@@ -22,7 +22,7 @@ let h = 480
 
 module Coord = struct
   type t = int * int
-  let compare (x1,y1) (x2,y2) =
+  let compare ((x1,y1): t) ((x2,y2): t) =
     if x1 < x2 then -1
     else if x1 > x2 then 1
     else if y1 < y2 then -1
