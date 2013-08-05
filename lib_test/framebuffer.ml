@@ -18,9 +18,9 @@ module Server = Rfb.Make(Rfb_lwt)
 open Server
 
 let w = 640
-let h = 480
+let h = 64
 
-let debug = ref false
+let debug = ref true
 
 module Coord = struct
   type t = int * int
@@ -34,17 +34,34 @@ end
 
 module CoordMap = Map.Make(Coord)
 
+module CoordSet = Set.Make(Coord)
+
 module Console = struct
   type t = {
     chars: int CoordMap.t;
+    blanks: CoordSet.t;
     cursor: Coord.t;
     cols: int;
   }
 
   let make cols =
     let chars = CoordMap.empty in
+    let blanks = CoordSet.empty in
     let cursor = 0, 0 in
-    { cols; chars; cursor }
+    { cols; chars; blanks; cursor }
+
+  let difference a b =
+    let chars = CoordMap.fold (fun coord char acc ->
+      if CoordMap.mem coord a.chars && (CoordMap.find coord a.chars = char)
+      then acc (* no change *)
+      else CoordMap.add coord char acc
+    ) b.chars CoordMap.empty in
+    let blanks = CoordMap.fold (fun coord char acc ->
+      if CoordMap.mem coord b.chars
+      then acc (* no change *)
+      else CoordSet.add coord acc
+    ) a.chars CoordSet.empty in
+    { b with chars; blanks }
 
   let output_char (t: t) c =
     if c = '\n'
@@ -116,14 +133,14 @@ let write_raw_char bpp console font c =
     ) pixels;
   FramebufferUpdate.Encoding.Raw { FramebufferUpdate.Raw.buffer = buffer }
 
-let write_empty_char bpp console font =
+let write_empty_char bpp font =
   let font_width = width_of_font font in
   let font_height = height_of_font font in
   let bytes_per_pixel = bpp / 8 in
   let buffer = String.make (font_width * font_height * bytes_per_pixel) '\000' in
   FramebufferUpdate.Encoding.Raw { FramebufferUpdate.Raw.buffer }
 
-let make_full_update bpp console font x y w h =
+let make_full_update bpp console font incremental x y w h =
   let updates = ref [] in
   let painted_already = Hashtbl.create 128 in
   let empty_already = ref None in
@@ -140,34 +157,55 @@ let make_full_update bpp console font x y w h =
   let ydelta = if h' < fst console.Console.cursor - 1 then fst console.Console.cursor - 1 - h' else 0 in
 
   let open FramebufferUpdate in
-  let copyrect (x, y) = Encoding.CopyRect { CopyRect.x; y } in
+  let push (row, col) encoding =
+    let x = col * font_width in
+    let y = row * font_height in
+    let update = {
+      x; y; w = font_width; h = font_height; encoding;
+    } in
+    updates := update :: !updates in
 
-  for row = y' to y' + h' - 1 do
-    for col = x' to x' + w' - 1 do
-      let x = col * font_width in
-      let y = row * font_height in
+  let copyrect (row, col) =
+    let x = col * font_width in
+    let y = row * font_height in
+    Encoding.CopyRect { CopyRect.x; y } in
+
+  let empty (row, col) =
+    if row >= y' && (row < (y' + h')) && (col >= x') && (col < (x' + w')) then begin
+      let encoding = match !empty_already with
+        | Some e -> copyrect e
+        | None ->
+          empty_already := Some (row, col);
+          write_empty_char bpp font in
+      push (row, col) encoding
+    end in
+
+  let char (row, col) c =
+    if row >= y' && (row < (y' + h')) && (col >= x') && (col < (x' + w')) then begin
       let encoding =
+        if Hashtbl.mem painted_already c
+        then copyrect (Hashtbl.find painted_already c)
+        else begin
+          Hashtbl.replace painted_already c (row, col);
+          write_raw_char bpp console font c
+        end in
+      push (row, col) encoding
+    end in
+
+  if incremental then begin
+    CoordSet.iter empty console.Console.blanks;
+    CoordMap.iter char console.Console.chars;
+  end else begin
+    for row = y' to y' + h' - 1 do
+      for col = x' to x' + w' - 1 do
         try
           let c = CoordMap.find (row + ydelta, col) console.Console.chars in
-          if Hashtbl.mem painted_already c
-          then copyrect (Hashtbl.find painted_already c)
-          else begin
-            Hashtbl.replace painted_already c (x, y);
-            write_raw_char bpp console font c
-          end
+          char (row, col) c
         with Not_found ->
-          begin match !empty_already with
-          | Some e -> copyrect e
-          | None ->
-            empty_already := Some (x, y);
-            write_empty_char bpp console font
-          end in
-      let update = {
-        x; y; w = font_width; h = font_height; encoding;
-      } in
-      updates := update :: !updates;
+          empty (row, col)
+      done
     done
-  done;
+  end;
   (* Updates must be ordered or else we may issue a CopyRect before the
      underlying data is written. *)
   List.rev !updates
@@ -202,7 +240,7 @@ let server (s: Lwt_unix.file_descr) font =
       lwt new_console = wait_for_update !client_remembers in
       Lwt_mutex.with_lock m
         (fun () ->
-          let update = make_full_update !bpp new_console font 0 0 w h in
+          let update = make_full_update !bpp (Console.difference !client_remembers new_console) font true 0 0 w h in
           if !debug
           then List.iter
             (fun x ->
@@ -216,6 +254,7 @@ let server (s: Lwt_unix.file_descr) font =
 
   while_lwt true do
     lwt req = Request.unmarshal s in
+lwt () = Lwt_unix.sleep 1. in
     Lwt_mutex.with_lock m (fun () ->
     if !debug then print_endline ("<- " ^ (Request.prettyprint req));
     match req with
@@ -239,7 +278,7 @@ let server (s: Lwt_unix.file_descr) font =
       return ()
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false; x; y; width; height } ->
       let c = !console in
-      let update = make_full_update !bpp c font x y width height in
+      let update = make_full_update !bpp c font false x y width height in
       client_remembers := c;
       if !debug
       then List.iter
