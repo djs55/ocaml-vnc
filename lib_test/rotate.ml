@@ -141,7 +141,7 @@ let animate fps f =
   done
 
 let server (s: Unix.file_descr) = 
-  Server.handshake w h s;
+  Server.handshake "rotate" w h s;
 
   let bpp = ref 32 in
   let last_update_seen = ref !update_counter in

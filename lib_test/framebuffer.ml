@@ -228,7 +228,7 @@ let wait_for_update c =
     )
 
 let server (s: Lwt_unix.file_descr) font = 
-  lwt () = Server.handshake w h s in
+  lwt () = Server.handshake "console" w h s in
 
   let bpp = ref 32 in
   let client_remembers = ref (Console.make 0) in

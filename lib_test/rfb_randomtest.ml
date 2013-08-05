@@ -20,7 +20,7 @@ module Server = Rfb.Make(Rfb_unix)
 open Server
 
 let server (s: Unix.file_descr) = 
-  Server.handshake w h s;
+  Server.handshake "random" w h s;
 
   let bpp = ref 32 in
   let update_thread = ref None in

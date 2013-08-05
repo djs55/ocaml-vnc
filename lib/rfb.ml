@@ -287,7 +287,6 @@ module SetEncodings = struct
     really_read s 1 >>= fun _ -> (* padding *)
     really_read s 2 >>= fun num ->
     let num = UInt16.unmarshal num in
-    let encodings = ref [] in
     let rec loop acc n =
       if n > num
       then return (List.rev acc)
@@ -490,16 +489,16 @@ end
 let white = (255, 255, 255)
 let black = (0, 0, 0)
 
-let handshake w h (s: Channel.fd) =
+let handshake name w h (s: Channel.fd) =
   let ver = { ProtocolVersion.major = 3; minor = 3 } in
-  really_write s (ProtocolVersion.marshal ver);
+  really_write s (ProtocolVersion.marshal ver) >>= fun () ->
   ProtocolVersion.unmarshal s >>= fun ver' ->
   print_endline (ProtocolVersion.prettyprint ver');
-  really_write s (SecurityType.marshal SecurityType.NoSecurity);
+  really_write s (SecurityType.marshal SecurityType.NoSecurity) >>= fun () ->
   ClientInit.unmarshal s >>= fun ci ->
   if ci then print_endline "Client requests a shared display"
   else print_endline "Client requests a non-shared display";
-  let si = { ServerInit.name = "dave's desktop";
+  let si = { ServerInit.name;
 	     width = w; height = h;
 	     pixelformat = PixelFormat.true_colour_default false } in
   really_write s (ServerInit.marshal si)
