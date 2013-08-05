@@ -279,8 +279,47 @@ module SetPixelFormat = struct
       x.PixelFormat.bpp x.PixelFormat.depth
 end
 
+module Encoding = struct
+  type t =
+    | Raw
+    | CopyRect
+    | RRE
+    | Hextile	
+    | ZRLE
+    | Cursor
+    | DesktopSize
+
+  let to_string = function
+    | Raw         -> "Raw"
+    | CopyRect    -> "CopyRect"
+    | RRE         -> "RRE"
+    | Hextile     -> "Hextile"
+    | ZRLE        -> "ZRLE"
+    | Cursor      -> "Cursor"
+    | DesktopSize -> "DesktopSize"
+
+  let to_int32 = function
+    | Raw         -> 0l
+    | CopyRect    -> 1l
+    | RRE         -> 2l
+    | Hextile     -> 5l
+    | ZRLE        -> 16l
+    | Cursor      -> -239l
+    | DesktopSize -> -223l
+
+  let of_int32 = function
+    | 0l    -> Some Raw
+    | 1l    -> Some CopyRect
+    | 2l    -> Some RRE
+    | 5l    -> Some Hextile
+    | 16l   -> Some ZRLE
+    | -239l -> Some Cursor
+    | -223l -> Some DesktopSize
+    | _     -> None
+end
+
 module SetEncodings = struct
-  type t = UInt32.t list
+  type t = Encoding.t list
 
   let unmarshal (s: Channel.fd) =
     really_read s 1 >>= fun _ -> (* padding *)
@@ -291,11 +330,13 @@ module SetEncodings = struct
       then return (List.rev acc)
       else
         really_read s 4 >>= fun x ->
-        loop (UInt32.unmarshal x :: acc) (n + 1) in
+        match Encoding.of_int32 (UInt32.unmarshal x) with
+        | None -> loop acc (n + 1)
+        | Some e -> loop (e :: acc) (n + 1) in
     loop [] 1
 
   let prettyprint (x: t) = 
-    Printf.sprintf "SetEncodings (num=%d)" (List.length x)
+    Printf.sprintf "SetEncodings (num=%d) [ %s ]" (List.length x) (String.concat "; " (List.map Encoding.to_string x))
 end
 
 module FramebufferUpdateRequest = struct
