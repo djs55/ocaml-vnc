@@ -217,9 +217,8 @@ module PixelFormat = struct
   let true_colour_default big_endian = {
     bpp = 32; depth = 24; big_endian = big_endian;
     true_colour = true;
-    (* rest are unused *)
-    red_max = 0; green_max = 0; blue_max = 0;
-    red_shift = 0; green_shift = 0; blue_shift = 0;
+    red_max = 0xff; green_max = 0xff; blue_max = 0xff;
+    red_shift = 16; green_shift = 8; blue_shift = 0;
   }
   let marshal (x: t) = 
     let bpp = String.make 1 (char_of_int x.bpp) in
