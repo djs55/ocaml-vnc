@@ -30,14 +30,15 @@ module CoordSet = Set.Make(Coord)
 module Console = struct
   type t = {
     chars: int CoordMap.t;
+    max_chars: int;  (* maximum number of stored characters *)
     cursor: Coord.t; (* XXX: should this be moved to the Window *)
     cols: int;
   }
 
-  let make cols =
+  let make ?(max_chars = 80 * 100) cols =
     let chars = CoordMap.empty in
     let cursor = 0, 0 in
-    { cols; chars; cursor }
+    { cols; chars; max_chars; cursor }
 
   let view t start_row rows =
     let chars = CoordMap.fold (fun (row, col) char acc ->
@@ -46,14 +47,17 @@ module Console = struct
       else acc
     ) t.chars CoordMap.empty in
     let cursor = fst t.cursor - start_row, snd t.cursor in
-    let cols = t.cols in
-    { chars; cursor; cols }
+    { t with chars; cursor }
 
   let output_char (t: t) c =
+    let chars =
+      if CoordMap.cardinal t.chars >= t.max_chars
+      then CoordMap.remove (fst (CoordMap.min_binding t.chars)) t.chars
+      else t.chars in
     if c = '\n'
-    then { t with chars = t.chars; cursor = fst t.cursor + 1, 0 }
+    then { t with chars = chars; cursor = fst t.cursor + 1, 0 }
     else
-      let chars = CoordMap.add t.cursor (int_of_char c) t.chars in
+      let chars = CoordMap.add t.cursor (int_of_char c) chars in
       let cursor =
         if snd t.cursor = t.cols - 1
         then fst t.cursor + 1, 0
