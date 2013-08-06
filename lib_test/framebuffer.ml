@@ -14,85 +14,15 @@
 open Rfb
 open Lwt
 
+open Textconsole
+
 module Server = Rfb.Make(Rfb_lwt)
 open Server
 
 let w = 640
-let h = 64
+let h = 480
 
 let debug = ref true
-
-module Coord = struct
-  type t = int * int
-  let compare ((x1,y1): t) ((x2,y2): t) =
-    if x1 < x2 then -1
-    else if x1 > x2 then 1
-    else if y1 < y2 then -1
-    else if y1 > y2 then 1
-    else 0
-end
-
-module CoordMap = Map.Make(Coord)
-
-module CoordSet = Set.Make(Coord)
-
-module Console = struct
-  type t = {
-    chars: int CoordMap.t;
-    blanks: CoordSet.t;
-    cursor: Coord.t;
-    cols: int;
-  }
-
-  let make cols =
-    let chars = CoordMap.empty in
-    let blanks = CoordSet.empty in
-    let cursor = 0, 0 in
-    { cols; chars; blanks; cursor }
-
-  let difference a b =
-    let chars = CoordMap.fold (fun coord char acc ->
-      if CoordMap.mem coord a.chars && (CoordMap.find coord a.chars = char)
-      then acc (* no change *)
-      else CoordMap.add coord char acc
-    ) b.chars CoordMap.empty in
-    let blanks = CoordMap.fold (fun coord char acc ->
-      if CoordMap.mem coord b.chars
-      then acc (* no change *)
-      else CoordSet.add coord acc
-    ) a.chars CoordSet.empty in
-    { b with chars; blanks }
-
-  let output_char (t: t) c =
-    if c = '\n'
-    then { t with chars = t.chars; cursor = fst t.cursor + 1, 0 }
-    else
-      let chars = CoordMap.add t.cursor (int_of_char c) t.chars in
-      (* TODO: scrolling *)
-      let cursor =
-        if snd t.cursor = t.cols - 1
-        then fst t.cursor + 1, 0
-        else fst t.cursor, snd t.cursor + 1 in
-      { t with chars = chars; cursor = cursor }
-
-  let output_string (t: t) s =
-    let s' = String.length s in
-    let rec loop i t =
-      if i = s' - 1 then t else loop (i + 1) (output_char t s.[i]) in
-    loop 0 t
-
-  let dump (t: t) =
-    let rows = CoordMap.fold (fun (row, _) _ biggest -> max biggest row) t.chars 0 in
-    for row = 0 to rows - 1 do
-      for col = 0 to t.cols - 1 do
-        try
-          let c = CoordMap.find (row, col) t.chars in
-          print_string (String.make 1 (char_of_int c))
-        with Not_found -> ()
-      done;
-      print_string "\n";
-    done
-end
 
 let height_of_font font =
   let open Pcf in
@@ -140,7 +70,7 @@ let write_empty_char bpp font =
   let buffer = String.make (font_width * font_height * bytes_per_pixel) '\000' in
   FramebufferUpdate.Encoding.Raw { FramebufferUpdate.Raw.buffer }
 
-let make_full_update bpp console font incremental x y w h =
+let make_full_update bpp drawing_operations visible_console font incremental x y w h =
   let updates = ref [] in
   let painted_already = Hashtbl.create 128 in
   let empty_already = ref None in
@@ -152,9 +82,6 @@ let make_full_update bpp console font incremental x y w h =
   let w = w + (x - x' * font_width) and h = h + (y - y' * font_height) in
   let w' = (w + font_width - 1) / font_width in
   let h' = (h + font_height - 1) / font_height in
-
-  (* convert into absolute text co-ordinates, assuming no scrollback *)
-  let ydelta = if h' < fst console.Console.cursor - 1 then fst console.Console.cursor - 1 - h' else 0 in
 
   let open FramebufferUpdate in
   let push (row, col) encoding =
@@ -187,19 +114,21 @@ let make_full_update bpp console font incremental x y w h =
         then copyrect (Hashtbl.find painted_already c)
         else begin
           Hashtbl.replace painted_already c (row, col);
-          write_raw_char bpp console font c
+          write_raw_char bpp visible_console font c
         end in
       push (row, col) encoding
     end in
 
   if incremental then begin
-    CoordSet.iter empty console.Console.blanks;
-    CoordMap.iter char console.Console.chars;
+    List.iter (function
+      | Delta.Write x -> CoordMap.iter char x
+      | Delta.Erase x -> CoordSet.iter empty x
+    ) drawing_operations
   end else begin
     for row = y' to y' + h' - 1 do
       for col = x' to x' + w' - 1 do
         try
-          let c = CoordMap.find (row + ydelta, col) console.Console.chars in
+          let c = CoordMap.find (row, col) visible_console.Console.chars in
           char (row, col) c
         with Not_found ->
           empty (row, col)
@@ -227,7 +156,7 @@ let wait_for_update c =
       return !console
     )
 
-let server (s: Lwt_unix.file_descr) font = 
+let server (s: Lwt_unix.file_descr) window font = 
   lwt () = Server.handshake "console" w h s in
 
   let bpp = ref 32 in
@@ -240,7 +169,9 @@ let server (s: Lwt_unix.file_descr) font =
       lwt new_console = wait_for_update !client_remembers in
       Lwt_mutex.with_lock m
         (fun () ->
-          let update = make_full_update !bpp (Console.difference !client_remembers new_console) font true 0 0 w h in
+          let drawing_operations = Delta.draw window !client_remembers window new_console in
+          let visible_console = Window.get_visible window new_console in 
+          let update = make_full_update !bpp drawing_operations visible_console font true 0 0 w h in
           if !debug
           then List.iter
             (fun x ->
@@ -277,7 +208,8 @@ let server (s: Lwt_unix.file_descr) font =
       return ()
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false; x; y; width; height } ->
       let c = !console in
-      let update = make_full_update !bpp c font false x y width height in
+      let visible_console = Window.get_visible window c in
+      let update = make_full_update !bpp [] visible_console font false x y width height in
       client_remembers := c;
       if !debug
       then List.iter
@@ -308,16 +240,17 @@ let main () =
   then Printf.fprintf stderr "WARNING: font is not claiming to be a terminal font\n%!";
   let cols = w / (width_of_font font) in
   let rows = h / (height_of_font font) in
+  let window = Window.make rows in
   Printf.fprintf stderr "Font has dimensions %d x %d\n%!" (width_of_font font) (height_of_font font);
   Printf.fprintf stderr "Setting rows to %d and cols to %d\n%!" rows cols;
 
   console := Console.make cols;
   let _ =
     while_lwt true do
-      lwt () = Lwt_unix.sleep 0.25 in
+      lwt () = Lwt_unix.sleep 0.05 in
       let t = "all work and no play makes Dave a dull boy. " in
       for_lwt i = 0 to String.length t - 1 do
-        lwt () = Lwt_unix.sleep 0.1 in
+        lwt () = Lwt_unix.sleep 0.01 in
         update_console (fun c -> Console.output_char c t.[i])
       done
     done in
@@ -333,6 +266,6 @@ let main () =
   Printf.printf "Listening on local port %d\n" port; flush stdout;
   Lwt_unix.listen s 5;
   lwt x = Lwt_unix.accept s in
-  server (fst x) font
+  server (fst x) window font
 
 let _ = Lwt_main.run (main ())
