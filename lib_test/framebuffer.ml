@@ -36,7 +36,7 @@ let width_of_font font =
   let a = get_accelerator font in
   a.Accelerator.min_bounds.Metrics.character_width
 
-let write_raw_char bpp console font c =
+let write_raw_char bpp font c =
   let font_width = width_of_font font in
   let font_height = height_of_font font in
   let bytes_per_pixel = bpp / 8 in
@@ -70,7 +70,7 @@ let write_empty_char bpp font =
   let buffer = String.make (font_width * font_height * bytes_per_pixel) '\000' in
   FramebufferUpdate.Encoding.Raw { FramebufferUpdate.Raw.buffer }
 
-let make_full_update bpp drawing_operations visible_console font incremental x y w h =
+let make_full_update bpp drawing_operations screen font incremental x y w h =
   let updates = ref [] in
   let painted_already = Hashtbl.create 128 in
   let empty_already = ref None in
@@ -114,7 +114,7 @@ let make_full_update bpp drawing_operations visible_console font incremental x y
         then copyrect (Hashtbl.find painted_already c)
         else begin
           Hashtbl.replace painted_already c (row, col);
-          write_raw_char bpp visible_console font c
+          write_raw_char bpp font c
         end in
       push (row, col) encoding
     end in
@@ -145,7 +145,7 @@ let make_full_update bpp drawing_operations visible_console font incremental x y
     for row = y' to y' + h' - 1 do
       for col = x' to x' + w' - 1 do
         try
-          let c = CoordMap.find (row, col) visible_console.Console.chars in
+          let c = CoordMap.find (row, col) screen.Screen.chars in
           char (row, col) c
         with Not_found ->
           empty (row, col)
@@ -187,7 +187,7 @@ let server (s: Lwt_unix.file_descr) window font =
       Lwt_mutex.with_lock m
         (fun () ->
           let drawing_operations = Delta.draw window !client_remembers window new_console in
-          let visible_console = Window.get_visible window new_console in 
+          let visible_console = Screen.make new_console window in
           let update = make_full_update !bpp drawing_operations visible_console font true 0 0 w h in
           if !debug
           then List.iter
@@ -225,7 +225,7 @@ let server (s: Lwt_unix.file_descr) window font =
       return ()
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false; x; y; width; height } ->
       let c = !console in
-      let visible_console = Window.get_visible window c in
+      let visible_console = Screen.make c window in
       let update = make_full_update !bpp [] visible_console font false x y width height in
       client_remembers := c;
       if !debug

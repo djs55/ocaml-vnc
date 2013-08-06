@@ -40,15 +40,6 @@ module Console = struct
     let cursor = 0, 0 in
     { cols; chars; max_chars; cursor }
 
-  let view t start_row rows =
-    let chars = CoordMap.fold (fun (row, col) char acc ->
-      if row >= start_row && (row < (start_row + rows))
-      then CoordMap.add (row - start_row, col) char acc
-      else acc
-    ) t.chars CoordMap.empty in
-    let cursor = fst t.cursor - start_row, snd t.cursor in
-    { t with chars; cursor }
-
   let output_char (t: t) c =
     let chars =
       if CoordMap.cardinal t.chars >= t.max_chars
@@ -90,14 +81,34 @@ module Window = struct
     | Fixed x -> x
     | End -> max 0 (fst console.Console.cursor - t.rows + 1)
 
-  let get_visible t console =
-    Console.view console (get_scroll_offset t console) t.rows
+end
 
-  let dump t console =
+module Screen = struct
+  type t = {
+    chars: int CoordMap.t;
+    cursor: Coord.t;
+    rows: int;
+    cols: int;
+  }
+
+  let make console window =
+    let start_row = Window.get_scroll_offset window console in
+    let rows = window.Window.rows in
+    let cols = console.Console.cols in
+
+    let chars = CoordMap.fold (fun (row, col) char acc ->
+      if row >= start_row && (row < (start_row + rows))
+      then CoordMap.add (row - start_row, col) char acc
+      else acc
+    ) console.Console.chars CoordMap.empty in
+    let cursor = fst console.Console.cursor - start_row, snd console.Console.cursor in
+    { chars; cursor; rows; cols }
+
+  let dump t =
     for row = 0 to t.rows - 1 do
-      for col = 0 to console.Console.cols - 1 do
+      for col = 0 to t.cols - 1 do
         try
-          let c = CoordMap.find (row, col) console.Console.chars in
+          let c = CoordMap.find (row, col) t.chars in
           print_string (String.make 1 (char_of_int c))
         with Not_found -> ()
       done;
@@ -111,59 +122,55 @@ module Delta = struct
     | Erase of CoordSet.t
     | Scroll of int
 
-  let update_chars a b =
+  let difference a b =
     let chars_to_draw = CoordMap.fold (fun coord char acc ->
-      if CoordMap.mem coord a.Console.chars && CoordMap.find coord a.Console.chars = char
+      if CoordMap.mem coord a.Screen.chars && CoordMap.find coord a.Screen.chars = char
       then acc (* already present *)
       else CoordMap.add coord char acc
-    ) b.Console.chars CoordMap.empty in
+    ) b.Screen.chars CoordMap.empty in
     let chars_to_erase = CoordMap.fold (fun coord char acc ->
-      if CoordMap.mem coord b.Console.chars 
+      if CoordMap.mem coord b.Screen.chars 
       then acc (* still present *)
       else CoordSet.add coord acc
-    ) a.Console.chars CoordSet.empty in
+    ) a.Screen.chars CoordSet.empty in
     [
       Write chars_to_draw;
       Erase chars_to_erase
     ]
 
-  let apply window console d =
-    let scroll_offset = Window.get_scroll_offset window console in
+  let apply screen d =
     match d with
     | Write chars_to_draw ->
-      let chars = CoordMap.fold (fun coord char acc ->
-        let coord' = fst coord + scroll_offset, snd coord in
-        CoordMap.add coord' char acc
-      ) chars_to_draw console.Console.chars in
-      { console with Console.chars }
+      let chars = CoordMap.fold CoordMap.add chars_to_draw screen.Screen.chars in
+      { screen with Screen.chars }
     | Erase chars_to_erase ->
-      let chars = CoordSet.fold (fun coord acc ->
-        let coord' = fst coord + scroll_offset, snd coord in
-        CoordMap.remove coord' acc
-      ) chars_to_erase console.Console.chars in
-      { console with Console.chars }
-    | Scroll _ -> console
+      let chars = CoordSet.fold CoordMap.remove chars_to_erase screen.Screen.chars in
+      { screen with Screen.chars }
+    | Scroll lines ->
+      let chars = CoordMap.fold (fun coord char acc ->
+        let coord' = fst coord + lines, snd coord in
+        CoordMap.add coord' char acc
+      ) screen.Screen.chars CoordMap.empty in
+      { screen with Screen.chars }
 
   let draw initial_window initial_console current_window current_console =
-    (* draw the new content into the current window *)
+    (* without moving the window, refresh the currently visible content *)
     let offset = Window.get_scroll_offset initial_window initial_console in
     let fixed_initial_window = { initial_window with Window.position = Window.Fixed offset } in
-    let a = Window.get_visible fixed_initial_window initial_console in
-    let b = Window.get_visible fixed_initial_window current_console in
-    let update_current_window = update_chars a b in
-    (* reflect these changes in 'initial_console' *)
-    let initial_console = List.fold_left (apply initial_window) initial_console update_current_window in
-
+    let a = Screen.make initial_console fixed_initial_window in
+    let b = Screen.make current_console fixed_initial_window in
+    let update_current_window = difference a b in
+    
     (* scroll the window *)
     let initial_scroll_offset = Window.get_scroll_offset initial_window initial_console in
     let final_scroll_offset = Window.get_scroll_offset current_window current_console in
     let change_scroll_offset = final_scroll_offset - initial_scroll_offset in
     let scroll = Scroll change_scroll_offset in
-
+    
     (* draw any new revealed content *)
-    let a = Window.get_visible current_window initial_console in
-    let b = Window.get_visible current_window current_console in
-    let final_reveal = update_chars a b in
+    let a = apply b scroll in
+    let b = Screen.make current_console current_window in
+    let final_reveal = difference a b in
 
     update_current_window @ [ scroll ] @ final_reveal
 end
@@ -175,6 +182,7 @@ let debug () =
     c := Console.output_string !c (Printf.sprintf "%d: hello world\n" i);
     Unix.sleep 1;
     Printf.fprintf stdout "Iteration %d\n%!" i;
-    Window.dump w (Window.get_visible w !c);
+    let s = Screen.make !c w in
+    Screen.dump s;
     flush stdout;
   done
