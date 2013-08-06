@@ -254,7 +254,6 @@ let server (s: Lwt_unix.file_descr) font =
 
   while_lwt true do
     lwt req = Request.unmarshal s in
-lwt () = Lwt_unix.sleep 1. in
     Lwt_mutex.with_lock m (fun () ->
     if !debug then print_endline ("<- " ^ (Request.prettyprint req));
     match req with
@@ -312,8 +311,7 @@ let main () =
   Printf.fprintf stderr "Font has dimensions %d x %d\n%!" (width_of_font font) (height_of_font font);
   Printf.fprintf stderr "Setting rows to %d and cols to %d\n%!" rows cols;
 
-  let c = Console.make cols in
-  console := Console.output_string c "hello world\n";
+  console := Console.make cols;
   let _ =
     while_lwt true do
       lwt () = Lwt_unix.sleep 0.25 in
