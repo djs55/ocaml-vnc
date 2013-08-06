@@ -105,10 +105,9 @@ module Delta = struct
   type t =
     | Write of int CoordMap.t
     | Erase of CoordSet.t
+    | Scroll of int
 
-  let draw initial_window initial_console current_window current_console =
-    let a = Window.get_visible initial_window initial_console in
-    let b = Window.get_visible current_window current_console in
+  let update_chars a b =
     let chars_to_draw = CoordMap.fold (fun coord char acc ->
       if CoordMap.mem coord a.Console.chars && CoordMap.find coord a.Console.chars = char
       then acc (* already present *)
@@ -123,6 +122,46 @@ module Delta = struct
       Write chars_to_draw;
       Erase chars_to_erase
     ]
+
+  let apply window console d =
+    let scroll_offset = Window.get_scroll_offset window console in
+    match d with
+    | Write chars_to_draw ->
+      let chars = CoordMap.fold (fun coord char acc ->
+        let coord' = fst coord + scroll_offset, snd coord in
+        CoordMap.add coord' char acc
+      ) chars_to_draw console.Console.chars in
+      { console with Console.chars }
+    | Erase chars_to_erase ->
+      let chars = CoordSet.fold (fun coord acc ->
+        let coord' = fst coord + scroll_offset, snd coord in
+        CoordMap.remove coord' acc
+      ) chars_to_erase console.Console.chars in
+      { console with Console.chars }
+    | Scroll _ -> console
+
+  let draw initial_window initial_console current_window current_console =
+    (* draw the new content into the current window *)
+    let offset = Window.get_scroll_offset initial_window initial_console in
+    let fixed_initial_window = { initial_window with Window.position = Window.Fixed offset } in
+    let a = Window.get_visible fixed_initial_window initial_console in
+    let b = Window.get_visible fixed_initial_window current_console in
+    let update_current_window = update_chars a b in
+    (* reflect these changes in 'initial_console' *)
+    let initial_console = List.fold_left (apply initial_window) initial_console update_current_window in
+
+    (* scroll the window *)
+    let initial_scroll_offset = Window.get_scroll_offset initial_window initial_console in
+    let final_scroll_offset = Window.get_scroll_offset current_window current_console in
+    let change_scroll_offset = final_scroll_offset - initial_scroll_offset in
+    let scroll = Scroll change_scroll_offset in
+
+    (* draw any new revealed content *)
+    let a = Window.get_visible current_window initial_console in
+    let b = Window.get_visible current_window current_console in
+    let final_reveal = update_chars a b in
+
+    update_current_window @ [ scroll ] @ final_reveal
 end
 
 let debug () = 

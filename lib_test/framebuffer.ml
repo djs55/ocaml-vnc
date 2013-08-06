@@ -119,10 +119,25 @@ let make_full_update bpp drawing_operations visible_console font incremental x y
       push (row, col) encoding
     end in
 
+  let scroll lines =
+    if lines > 0 then begin
+      let encoding = Encoding.CopyRect { CopyRect.x = 0; y = lines * font_height } in
+      let update = {
+        x = 0; y = 0; w = w; h = h - lines * font_height; encoding
+      } in
+      updates := update :: !updates
+    end else if lines < 0 then begin
+      let encoding = Encoding.CopyRect { CopyRect.x = 0; y = 0 } in
+      let update = {
+        x = 0; y = -lines * font_height; w = w; h = -lines * font_height; encoding
+      } in
+      updates := update :: !updates
+    end in
   if incremental then begin
     List.iter (function
       | Delta.Write x -> CoordMap.iter char x
       | Delta.Erase x -> CoordSet.iter empty x
+      | Delta.Scroll x -> scroll x
     ) drawing_operations
   end else begin
     for row = y' to y' + h' - 1 do
@@ -246,9 +261,11 @@ let main () =
 
   console := Console.make cols;
   let _ =
+    let j = ref 0 in
     while_lwt true do
       lwt () = Lwt_unix.sleep 0.05 in
-      let t = "all work and no play makes Dave a dull boy. " in
+      let t = Printf.sprintf "%d: all work and no play makes Dave a dull boy.\n" !j in
+      incr j;
       for_lwt i = 0 to String.length t - 1 do
         lwt () = Lwt_unix.sleep 0.01 in
         update_console (fun c -> Console.output_char c t.[i])
