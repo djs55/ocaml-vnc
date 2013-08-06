@@ -121,11 +121,13 @@ let make_full_update bpp drawing_operations visible_console font incremental x y
 
   let scroll lines =
     if lines > 0 then begin
-      let encoding = Encoding.CopyRect { CopyRect.x = 0; y = lines * font_height } in
-      let update = {
-        x = 0; y = 0; w = w; h = h - lines * font_height; encoding
-      } in
-      updates := update :: !updates
+      for y = 1 to font_height do
+        let encoding = Encoding.CopyRect { CopyRect.x = 0; y = lines } in
+        let update = {
+          x = 0; y = 0; w = w; h = h - lines; encoding
+        } in
+        updates := update :: !updates;
+      done
     end else if lines < 0 then begin
       let encoding = Encoding.CopyRect { CopyRect.x = 0; y = 0 } in
       let update = {
