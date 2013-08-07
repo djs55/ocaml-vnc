@@ -1,6 +1,8 @@
 all: build
 
 configure: setup.data
+
+setup.data: setup.ml
 	ocaml setup.ml -configure
 
 build: configure

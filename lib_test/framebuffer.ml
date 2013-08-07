@@ -181,8 +181,7 @@ let server (s: Lwt_unix.file_descr) window font =
   let m = Lwt_mutex.create () in
   let framebuffer_thread = ref None in
 
-  let framebuffer_thread_body () =
-    while_lwt true do
+  let one_background_incremental_update () =
       lwt new_console = wait_for_update !client_remembers in
       Lwt_mutex.with_lock m
         (fun () ->
@@ -198,7 +197,7 @@ let server (s: Lwt_unix.file_descr) window font =
           client_remembers := new_console;
           return ()
         )
-     done in
+     in
 
   while_lwt true do
     lwt req = Request.unmarshal s in
@@ -220,8 +219,7 @@ let server (s: Lwt_unix.file_descr) window font =
           Printf.printf "Ignoring keycode: %lx\n%!" key;
           return ())
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = true } ->
-      if !framebuffer_thread = None
-      then framebuffer_thread := Some (framebuffer_thread_body ());
+      let _ = one_background_incremental_update () in
       return ()
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false; x; y; width; height } ->
       let c = !console in
