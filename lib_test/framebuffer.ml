@@ -173,20 +173,31 @@ let server (s: Lwt_unix.file_descr) window font =
   let m = Lwt_mutex.create () in
   let framebuffer_thread = ref None in
 
+  let start_new_thread = ref true in
+
   let one_background_incremental_update () =
-      lwt new_console = wait_for_update !client_remembers in
-      Lwt_mutex.with_lock m
-        (fun () ->
+      start_new_thread := false;
+      let updates = ref [] in
+      lwt () =
+        while_lwt !updates = [] do
+          lwt new_console = wait_for_update !client_remembers in
           let drawing_operations = Delta.draw window !client_remembers window new_console in
           let visible_console = Screen.make new_console window in
-          let update = make_full_update !bpp drawing_operations visible_console font true 0 0 w h in
-          if !debug
-          then List.iter
-            (fun x ->
-              print_endline ("-> " ^ (FramebufferUpdate.prettyprint x));
-            ) update;
-          lwt () = Rfb_lwt.really_write s (FramebufferUpdate.marshal update) in
+          updates := make_full_update !bpp drawing_operations visible_console font true 0 0 w h;
           client_remembers := new_console;
+          return ()
+        done in
+      start_new_thread := true;
+      Lwt_mutex.with_lock m
+        (fun () ->
+          if !debug then begin
+            print_endline "-> FramebufferUpdate";
+            List.iter
+              (fun x ->
+                print_endline (FramebufferUpdate.prettyprint x);
+              ) !updates;
+          end;
+          lwt () = Rfb_lwt.really_write s (FramebufferUpdate.marshal !updates) in
           return ()
         )
      in
@@ -211,18 +222,20 @@ let server (s: Lwt_unix.file_descr) window font =
           Printf.printf "Ignoring keycode: %lx\n%!" key;
           return ())
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = true } ->
-      let _ = one_background_incremental_update () in
+      if !start_new_thread then ignore(one_background_incremental_update ());
       return ()
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false; x; y; width; height } ->
       let c = !console in
       let visible_console = Screen.make c window in
       let update = make_full_update !bpp [] visible_console font false x y width height in
       client_remembers := c;
-      if !debug
-      then List.iter
-        (fun x ->
-          print_endline ("-> " ^ (FramebufferUpdate.prettyprint x));
-        ) update;
+      if !debug then begin
+        print_endline "-> FramebufferUpdate";
+        List.iter
+          (fun x ->
+            print_endline (FramebufferUpdate.prettyprint x);
+          ) update;
+      end;
       Rfb_lwt.really_write s (FramebufferUpdate.marshal update);
     | _ ->
 	if !debug then print_endline "<- ^^ ignoring";
