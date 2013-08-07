@@ -380,18 +380,41 @@ module FramebufferUpdate = struct
     let prettyprint (x: t) = 
       Printf.sprintf "{ x = %d; y = %d }" x.x x.y
   end
+  module RRE = struct
+    type t = {
+      background: string;
+      rectangles: rectangle list;
+    } and rectangle = {
+      foreground: string;
+      x: int;
+      y: int;
+      w: int;
+      h: int;
+    }
+    let sizeof (x: t) =
+      let pixel = String.length x.background in
+      pixel + 4 + (8 + pixel) * (List.length x.rectangles)
+    let marshal (x: t) =
+      UInt32.marshal (Int32.of_int (List.length x.rectangles)) ^ x.background ^
+      (String.concat "" (List.map (fun r -> r.foreground ^ (UInt16.marshal r.x) ^ (UInt16.marshal r.y) ^ (UInt16.marshal r.w) ^ (UInt16.marshal r.h)) x.rectangles))
+    let prettyprint (x: t) =
+      Printf.sprintf "{ background = %s; rectangles = %d }" x.background (List.length x.rectangles) 
+  end
   module Encoding = struct
     type t = 
       | Raw of Raw.t
       | CopyRect of CopyRect.t
+      | RRE of RRE.t
       | DesktopSize
     let sizeof (x: t) = match x with
       | Raw x -> 4 + Raw.sizeof x
       | CopyRect x -> 4 + CopyRect.sizeof x
+      | RRE x -> 4 + RRE.sizeof x
       | DesktopSize -> 4
     let marshal (x: t) = match x with
       | Raw x -> UInt32.marshal 0l ^ (Raw.marshal x)
       | CopyRect x -> UInt32.marshal 1l ^ (CopyRect.marshal x)
+      | RRE x -> UInt32.marshal 2l ^ (RRE.marshal x)
       | DesktopSize -> UInt32.marshal (-223l)
     let marshal_at (buf: string) (off: int) (x: t) = match x with
       | Raw x -> 
@@ -400,11 +423,13 @@ module FramebufferUpdate = struct
       | CopyRect x -> 
         let off = UInt32.marshal_at buf off 1l in
         CopyRect.marshal_at buf off x
+      | RRE x -> failwith "unimplemented RRE.marshal_at"
       | DesktopSize -> 
         UInt32.marshal_at buf off (-223l)
     let prettyprint = function
       | Raw _ -> "Raw"
       | CopyRect x -> "CopyRect " ^ (CopyRect.prettyprint x)
+      | RRE x -> "RRE " ^ (RRE.prettyprint x)
       | DesktopSize -> "DesktopSize"
   end
   type t = { x: int; y: int; w: int; h: int; encoding: Encoding.t }
@@ -429,7 +454,7 @@ module FramebufferUpdate = struct
     let length = UInt16.marshal (List.length xs) in
     "\000\000" ^ length ^ (String.concat "" (List.map update xs))
   let prettyprint (t: t) =
-    Printf.sprintf "FramebufferUpdate {x=%d y=%d w=%d h=%d encoding=%s}"
+    Printf.sprintf "Rectangle {x=%d y=%d w=%d h=%d encoding=%s}"
       t.x t.y t.w t.h (Encoding.prettyprint t.encoding)
 end
 

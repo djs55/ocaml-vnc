@@ -63,17 +63,10 @@ let write_raw_char bpp font c =
     ) pixels;
   FramebufferUpdate.Encoding.Raw { FramebufferUpdate.Raw.buffer = buffer }
 
-let write_empty_char bpp font =
-  let font_width = width_of_font font in
-  let font_height = height_of_font font in
-  let bytes_per_pixel = bpp / 8 in
-  let buffer = String.make (font_width * font_height * bytes_per_pixel) '\000' in
-  FramebufferUpdate.Encoding.Raw { FramebufferUpdate.Raw.buffer }
-
 let make_full_update bpp drawing_operations screen font incremental x y w h =
   let updates = ref [] in
+  let bytes_per_pixel = bpp / 8 in
   let painted_already = Hashtbl.create 128 in
-  let empty_already = ref None in
   let font_width = width_of_font font in
   let font_height = height_of_font font in
 
@@ -99,11 +92,10 @@ let make_full_update bpp drawing_operations screen font incremental x y w h =
 
   let empty (row, col) =
     if row >= y' && (row < (y' + h')) && (col >= x') && (col < (x' + w')) then begin
-      let encoding = match !empty_already with
-        | Some e -> copyrect e
-        | None ->
-          empty_already := Some (row, col);
-          write_empty_char bpp font in
+      let encoding = Encoding.RRE {
+        RRE.background = String.make bytes_per_pixel '\000';
+        rectangles = []
+      } in
       push (row, col) encoding
     end in
 
