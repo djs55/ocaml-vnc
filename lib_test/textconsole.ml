@@ -178,7 +178,9 @@ module Delta = struct
         then screen.Screen.coords
         else
           let existing = CoordMap.find coord screen.Screen.cells in
-          CellMap.remove existing screen.Screen.coords in
+          if CellMap.find existing screen.Screen.coords = coord
+          then CellMap.remove existing screen.Screen.coords
+          else screen.Screen.coords in
       let cells = CoordMap.add coord cell screen.Screen.cells in
       { screen with Screen.cells; coords }
     | Copy (coord, from) ->
