@@ -118,14 +118,10 @@ module Screen = struct
     let start_row = Window.get_scroll_offset window console in
     let rows = window.Window.rows in
     let cols = console.Console.cols in
-
-    let y, x = fst console.Console.cursor - start_row, snd console.Console.cursor in
-    let cursor = if y < 0 || y >= rows || x < 0 || x >= cols then None else Some (y, x) in
-
     let cells, coords = CoordMap.fold (fun (row, col) char (cells, coords) ->
       if row >= start_row && (row < (start_row + rows))
       then
-        let cell = { char = Some char; highlight = cursor = Some (row, col) } in
+        let cell = { char = Some char; highlight = console.Console.cursor = (row, col) } in
         let coord = row - start_row, col in
         let cells = CoordMap.add coord cell cells in
         let coords = CellMap.add cell coord coords in
