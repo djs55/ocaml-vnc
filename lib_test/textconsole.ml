@@ -102,7 +102,7 @@ module Screen = struct
       else acc
     ) console.Console.chars CoordMap.empty in
     let y, x = fst console.Console.cursor - start_row, snd console.Console.cursor in
-    let cursor = if y < 0 || y >= rows || x < 0 || x >= cols then None else Some (y, x) in 
+    let cursor = if y < 0 || y >= rows || x < 0 || x >= cols then None else Some (y, x) in
     { chars; cursor; rows; cols }
 
   let dump t =
@@ -127,27 +127,50 @@ module Delta = struct
     | Update of Coord.t * cell
     | Scroll of int
 
-  let difference a b =
+  let to_string = function
+    | Scroll x -> Printf.sprintf "Scroll %d" x
+    | Update (coord, cell) ->
+      Printf.sprintf "Update %d,%d char = %s highlight = %b"
+        (fst coord) (snd coord)
+        (match cell.char with None -> "None" | Some x -> String.make 1 (char_of_int x))
+        cell.highlight
+
+  let difference invalidate a b =
     let cells = CoordMap.empty in
     (* unhighlight the old cursor location *)
-Printf.printf "a.cursor = %s b.cursor = %s\n%!" (match a.Screen.cursor with None -> "None" | Some (row, col) -> string_of_int row ^ "," ^ (string_of_int col)) (match b.Screen.cursor with None -> "None" | Some (row, col) -> string_of_int row ^ "," ^ (string_of_int col));
-
-    let cells = match a.Screen.cursor with
-      | None -> cells
-      | Some x -> CoordMap.add x { char = if CoordMap.mem x b.Screen.chars then Some (CoordMap.find x b.Screen.chars) else None; highlight = false } cells in
-    let cells = match b.Screen.cursor with
-      | None -> cells
-      | Some x -> CoordMap.add x { char = if CoordMap.mem x b.Screen.chars then Some (CoordMap.find x b.Screen.chars) else None; highlight = true } cells in
-    let cells = CoordMap.fold (fun coord char acc ->
-      if CoordMap.mem coord a.Screen.chars && CoordMap.find coord a.Screen.chars = char
-      then acc (* already present *)
-      else CoordMap.add coord { char = Some char; highlight = b.Screen.cursor = Some coord }  acc
-    ) b.Screen.chars cells in
-    let cells = CoordMap.fold (fun coord char acc ->
-      if CoordMap.mem coord b.Screen.chars 
-      then acc (* still present *)
-      else CoordMap.add coord { char = None; highlight = b.Screen.cursor = Some coord } acc
-    ) a.Screen.chars cells in
+    let draw coord map =
+      let char =
+        if CoordMap.mem coord b.Screen.chars
+        then Some (CoordMap.find coord b.Screen.chars)
+        else None in
+      let highlight = b.Screen.cursor = Some coord in
+      CoordMap.add coord { char; highlight } map in
+    let cells =
+      if invalidate then begin
+        let rec loop acc row col =
+          let row, col = if col = a.Screen.cols then row + 1, 0 else row, col in
+          if row >= a.Screen.rows then acc
+          else loop (draw (row, col) acc) row (col + 1) in
+        loop CoordMap.empty 0 0
+      end else begin
+        let cells = match a.Screen.cursor with
+        | None -> cells
+        | Some x -> draw x cells in
+        let cells = match b.Screen.cursor with
+        | None -> cells
+        | Some x -> draw x cells in
+        let cells = CoordMap.fold (fun coord char acc ->
+          if CoordMap.mem coord a.Screen.chars && CoordMap.find coord a.Screen.chars = char
+          then acc (* already present *)
+          else draw coord acc
+        ) b.Screen.chars cells in
+        let cells = CoordMap.fold (fun coord char acc ->
+          if CoordMap.mem coord b.Screen.chars 
+          then acc (* still present *)
+          else draw coord acc
+        ) a.Screen.chars cells
+        in cells
+      end in
     CoordMap.fold (fun coord cell acc ->
       Update (coord, cell) :: acc
     ) cells []
@@ -170,26 +193,32 @@ let apply screen d =
       | Some x -> Some (fst x + lines, snd x) in
       { screen with Screen.chars; Screen.cursor }
 
-  let draw initial_window initial_console current_window current_console =
+  let draw invalidate initial_window initial_console current_window current_console =
     (* without moving the window, refresh the currently visible content *)
     let offset = Window.get_scroll_offset initial_window initial_console in
     let fixed_initial_window = { initial_window with Window.position = Window.Fixed offset } in
     let a = Screen.make initial_console fixed_initial_window in
     let b = Screen.make current_console fixed_initial_window in
-    let update_current_window = difference a b in
+    let update_current_window = difference invalidate a b in
     
     (* scroll the window *)
     let initial_scroll_offset = Window.get_scroll_offset initial_window initial_console in
     let final_scroll_offset = Window.get_scroll_offset current_window current_console in
     let change_scroll_offset = final_scroll_offset - initial_scroll_offset in
-    let scroll = Scroll change_scroll_offset in
-    
-    (* draw any new revealed content *)
-    let a = apply b scroll in
-    let b = Screen.make current_console current_window in
-    let final_reveal = difference a b in
 
-    update_current_window @ [ scroll ] @ final_reveal
+    let the_rest =
+      if change_scroll_offset = 0
+      then []
+      else
+        let scroll = Scroll change_scroll_offset in
+    
+        (* draw any new revealed content *)
+        let a = apply b scroll in
+        let b = Screen.make current_console current_window in
+        let final_reveal = difference invalidate a b in
+        scroll :: final_reveal in
+
+    update_current_window @ the_rest
 end
 
 let debug () = 

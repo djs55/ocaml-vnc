@@ -63,7 +63,7 @@ let write_raw_char bpp font highlight c =
     ) pixels;
   FramebufferUpdate.Encoding.Raw { FramebufferUpdate.Raw.buffer = buffer }
 
-let make_full_update bpp drawing_operations screen font incremental x y w h =
+let make_full_update bpp drawing_operations font x y w h =
   let updates = ref [] in
   let bytes_per_pixel = bpp / 8 in
   let painted_already = Hashtbl.create 128 in
@@ -123,22 +123,10 @@ let make_full_update bpp drawing_operations screen font incremental x y w h =
       } in
       updates := update :: !updates
     end in
-  if incremental then begin
     List.iter (function
       | Delta.Update (coord, x) -> char coord x
       | Delta.Scroll x -> scroll x
-    ) drawing_operations
-  end else begin
-    for row = y' to y' + h' - 1 do
-      for col = x' to x' + w' - 1 do
-        try
-          let c = CoordMap.find (row, col) screen.Screen.chars in
-          char (row, col) { Delta.char = Some c; highlight = (screen.Screen.cursor = Some (row, col)) }
-        with Not_found ->
-          char (row, col) { Delta.char = None; highlight = (screen.Screen.cursor = Some (row, col)) }
-      done
-    done
-  end;
+    ) drawing_operations;
   (* Updates must be ordered or else we may issue a CopyRect before the
      underlying data is written. *)
   List.rev !updates
@@ -176,9 +164,8 @@ let server (s: Lwt_unix.file_descr) window font =
       lwt () =
         while_lwt !updates = [] do
           lwt new_console = wait_for_update !client_remembers in
-          let drawing_operations = Delta.draw window !client_remembers window new_console in
-          let visible_console = Screen.make new_console window in
-          updates := make_full_update !bpp drawing_operations visible_console font true 0 0 w h;
+          let drawing_operations = Delta.draw false window !client_remembers window new_console in
+          updates := make_full_update !bpp drawing_operations font 0 0 w h;
           client_remembers := new_console;
           return ()
         done in
@@ -221,8 +208,8 @@ let server (s: Lwt_unix.file_descr) window font =
       return ()
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false; x; y; width; height } ->
       let c = !console in
-      let visible_console = Screen.make c window in
-      let update = make_full_update !bpp [] visible_console font false x y width height in
+      let drawing_operations = Delta.draw true window c window c in
+      let update = make_full_update !bpp drawing_operations font x y width height in
       client_remembers := c;
       if !debug then begin
         print_endline "-> FramebufferUpdate";

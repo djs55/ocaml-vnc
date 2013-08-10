@@ -83,7 +83,6 @@ module Screen : sig
   val make: Console.t -> Window.t -> t
   (** [make console window] extracts the visible part of [console] according
       to [window] *)
-
 end
 
 module Delta : sig
@@ -98,11 +97,14 @@ module Delta : sig
     | Update of Coord.t * cell (** single character cell updates *)
     | Scroll of int            (** a number of lines to scroll (+ve means down) *)
 
+  val to_string: t -> string
+  (** [to_string t] pretty-prints [t] *)
+
   val apply: Screen.t -> t -> Screen.t
   (** [apply screen t] applies the drawing operation [t] to [screen] *)
 
-  val draw: Window.t -> Console.t -> Window.t -> Console.t -> t list
-  (** [draw initial_window initial_console final_window final_console]
+  val draw: bool -> Window.t -> Console.t -> Window.t -> Console.t -> t list
+  (** [draw invalidate initial_window initial_console final_window final_console]
       constructs a list of drawing operations which, when applied to
       [Screen.make initial_console initial_window] will transform it into
       [Screen.make final_console final_window] *)
