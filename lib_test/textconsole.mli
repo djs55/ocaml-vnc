@@ -95,8 +95,8 @@ module Delta : sig
   }
 
   type t =
-    | Update of cell CoordMap.t (** character cell updates *)
-    | Scroll of int                    (** a number of lines to scroll (+ve means down) *)
+    | Update of Coord.t * cell (** single character cell updates *)
+    | Scroll of int            (** a number of lines to scroll (+ve means down) *)
 
   val apply: Screen.t -> t -> Screen.t
   (** [apply screen t] applies the drawing operation [t] to [screen] *)

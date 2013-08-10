@@ -125,7 +125,7 @@ let make_full_update bpp drawing_operations screen font incremental x y w h =
     end in
   if incremental then begin
     List.iter (function
-      | Delta.Update x -> CoordMap.iter char x
+      | Delta.Update (coord, x) -> char coord x
       | Delta.Scroll x -> scroll x
     ) drawing_operations
   end else begin

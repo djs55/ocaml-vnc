@@ -124,7 +124,7 @@ module Delta = struct
   }
 
   type t =
-    | Update of cell CoordMap.t
+    | Update of Coord.t * cell
     | Scroll of int
 
   let difference a b =
@@ -148,18 +148,17 @@ Printf.printf "a.cursor = %s b.cursor = %s\n%!" (match a.Screen.cursor with None
       then acc (* still present *)
       else CoordMap.add coord { char = None; highlight = b.Screen.cursor = Some coord } acc
     ) a.Screen.chars cells in
-    [ Update cells ]
+    CoordMap.fold (fun coord cell acc ->
+      Update (coord, cell) :: acc
+    ) cells []
   
 let apply screen d =
     match d with
-    | Update cells ->
-      let chars, cursor = CoordMap.fold (fun coord cell (chars, cursor) ->
-        let chars = match cell.char with
-          | Some char -> CoordMap.add coord char screen.Screen.chars
-          | None -> CoordMap.remove coord screen.Screen.chars in
-        let cursor = if cell.highlight then Some coord else cursor in
-        chars, cursor
-      ) cells (screen.Screen.chars, screen.Screen.cursor) in
+    | Update (coord, cell) ->
+      let chars = match cell.char with
+      | Some char -> CoordMap.add coord char screen.Screen.chars
+      | None -> CoordMap.remove coord screen.Screen.chars in
+      let cursor = if cell.highlight then Some coord else screen.Screen.cursor in
       { screen with Screen.chars; cursor }
     | Scroll lines ->
       let chars = CoordMap.fold (fun coord char acc ->
