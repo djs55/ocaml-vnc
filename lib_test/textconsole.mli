@@ -74,10 +74,10 @@ end
 module Screen : sig
   (** Represents a set of visible characters *)
   type t = {
-    chars: int CoordMap.t; (** the visible characters in screen co-ordinates *)
-    cursor: Coord.t;       (** the cursor position in screen co-ordinates *)
-    rows: int;             (** the number of visible rows *)
-    cols: int;             (** the number of visible columns *)
+    chars: int CoordMap.t;  (** the visible characters in screen co-ordinates *)
+    cursor: Coord.t option; (** the cursor position in screen co-ordinates *)
+    rows: int;              (** the number of visible rows *)
+    cols: int;              (** the number of visible columns *)
   }
 
   val make: Console.t -> Window.t -> t
@@ -89,10 +89,14 @@ end
 module Delta : sig
   (** Represents a drawing operation to update the state of a Screen *)
 
+  type cell = {
+    char: int option;      (** visible symbol or 'glyph' *)
+    highlight: bool;
+  }
+
   type t =
-    | Write of int CoordMap.t (** characters to be written *)
-    | Erase of CoordSet.t     (** characters to be erased *)
-    | Scroll of int           (** a number of lines to scroll (+ve means down) *)
+    | Update of cell CoordMap.t (** character cell updates *)
+    | Scroll of int                    (** a number of lines to scroll (+ve means down) *)
 
   val apply: Screen.t -> t -> Screen.t
   (** [apply screen t] applies the drawing operation [t] to [screen] *)

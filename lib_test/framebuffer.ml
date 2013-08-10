@@ -36,7 +36,7 @@ let width_of_font font =
   let a = get_accelerator font in
   a.Accelerator.min_bounds.Metrics.character_width
 
-let write_raw_char bpp font c =
+let write_raw_char bpp font highlight c =
   let font_width = width_of_font font in
   let font_height = height_of_font font in
   let bytes_per_pixel = bpp / 8 in
@@ -53,7 +53,7 @@ let write_raw_char bpp font c =
       Array.iteri
         (fun col pixel ->
           let ofs = (row * font_width + col) * bytes_per_pixel in
-          let c = if pixel then 0xffffff else 0x0 in
+          let c = if (pixel && not highlight)||(not pixel && highlight) then 0xffffff else 0x0 in
           buffer.[ofs + 0] <- char_of_int (c lsr 16);
           buffer.[ofs + 1] <- char_of_int ((c lsr 8) land 0xff);
           buffer.[ofs + 2] <- char_of_int (c land 0xff);
@@ -85,29 +85,25 @@ let make_full_update bpp drawing_operations screen font incremental x y w h =
     } in
     updates := update :: !updates in
 
-  let copyrect (row, col) =
-    let x = col * font_width in
-    let y = row * font_height in
-    Encoding.CopyRect { CopyRect.x; y } in
-
-  let empty (row, col) =
+  let char (row, col) { Delta.highlight = highlight; char = char } =
     if row >= y' && (row < (y' + h')) && (col >= x') && (col < (x' + w')) then begin
-      let encoding = Encoding.RRE {
-        RRE.background = String.make bytes_per_pixel '\000';
-        rectangles = []
-      } in
-      push (row, col) encoding
-    end in
-
-  let char (row, col) c =
-    if row >= y' && (row < (y' + h')) && (col >= x') && (col < (x' + w')) then begin
-      let encoding =
-        if Hashtbl.mem painted_already c
-        then copyrect (Hashtbl.find painted_already c)
-        else begin
-          Hashtbl.replace painted_already c (row, col);
-          write_raw_char bpp font c
-        end in
+      let encoding = match char with
+        | None ->
+          Encoding.RRE {
+            RRE.background = String.make bytes_per_pixel (if highlight then '\255' else '\000');
+            rectangles = []
+          }
+        | Some c ->
+          if Hashtbl.mem painted_already (c, highlight) then begin
+            let row, col = Hashtbl.find painted_already (c, highlight) in
+            let x = col * font_width in
+            let y = row * font_height in
+            Encoding.CopyRect { CopyRect.x; y }
+          end else begin
+            Hashtbl.replace painted_already (c, highlight) (row, col);
+            write_raw_char bpp font highlight c
+          end
+      in
       push (row, col) encoding
     end in
 
@@ -129,8 +125,7 @@ let make_full_update bpp drawing_operations screen font incremental x y w h =
     end in
   if incremental then begin
     List.iter (function
-      | Delta.Write x -> CoordMap.iter char x
-      | Delta.Erase x -> CoordSet.iter empty x
+      | Delta.Update x -> CoordMap.iter char x
       | Delta.Scroll x -> scroll x
     ) drawing_operations
   end else begin
@@ -138,9 +133,9 @@ let make_full_update bpp drawing_operations screen font incremental x y w h =
       for col = x' to x' + w' - 1 do
         try
           let c = CoordMap.find (row, col) screen.Screen.chars in
-          char (row, col) c
+          char (row, col) { Delta.char = Some c; highlight = (screen.Screen.cursor = Some (row, col)) }
         with Not_found ->
-          empty (row, col)
+          char (row, col) { Delta.char = None; highlight = (screen.Screen.cursor = Some (row, col)) }
       done
     done
   end;

@@ -86,7 +86,7 @@ end
 module Screen = struct
   type t = {
     chars: int CoordMap.t;
-    cursor: Coord.t;
+    cursor: Coord.t option;
     rows: int;
     cols: int;
   }
@@ -101,7 +101,8 @@ module Screen = struct
       then CoordMap.add (row - start_row, col) char acc
       else acc
     ) console.Console.chars CoordMap.empty in
-    let cursor = fst console.Console.cursor - start_row, snd console.Console.cursor in
+    let y, x = fst console.Console.cursor - start_row, snd console.Console.cursor in
+    let cursor = if y < 0 || y >= rows || x < 0 || x >= cols then None else Some (y, x) in 
     { chars; cursor; rows; cols }
 
   let dump t =
@@ -117,41 +118,58 @@ module Screen = struct
 end
 
 module Delta = struct
+  type cell = {
+    char: int option;
+    highlight: bool;
+  }
+
   type t =
-    | Write of int CoordMap.t
-    | Erase of CoordSet.t
+    | Update of cell CoordMap.t
     | Scroll of int
 
   let difference a b =
-    let chars_to_draw = CoordMap.fold (fun coord char acc ->
+    let cells = CoordMap.empty in
+    (* unhighlight the old cursor location *)
+Printf.printf "a.cursor = %s b.cursor = %s\n%!" (match a.Screen.cursor with None -> "None" | Some (row, col) -> string_of_int row ^ "," ^ (string_of_int col)) (match b.Screen.cursor with None -> "None" | Some (row, col) -> string_of_int row ^ "," ^ (string_of_int col));
+
+    let cells = match a.Screen.cursor with
+      | None -> cells
+      | Some x -> CoordMap.add x { char = if CoordMap.mem x b.Screen.chars then Some (CoordMap.find x b.Screen.chars) else None; highlight = false } cells in
+    let cells = match b.Screen.cursor with
+      | None -> cells
+      | Some x -> CoordMap.add x { char = if CoordMap.mem x b.Screen.chars then Some (CoordMap.find x b.Screen.chars) else None; highlight = true } cells in
+    let cells = CoordMap.fold (fun coord char acc ->
       if CoordMap.mem coord a.Screen.chars && CoordMap.find coord a.Screen.chars = char
       then acc (* already present *)
-      else CoordMap.add coord char acc
-    ) b.Screen.chars CoordMap.empty in
-    let chars_to_erase = CoordMap.fold (fun coord char acc ->
+      else CoordMap.add coord { char = Some char; highlight = b.Screen.cursor = Some coord }  acc
+    ) b.Screen.chars cells in
+    let cells = CoordMap.fold (fun coord char acc ->
       if CoordMap.mem coord b.Screen.chars 
       then acc (* still present *)
-      else CoordSet.add coord acc
-    ) a.Screen.chars CoordSet.empty in
-    [
-      Write chars_to_draw;
-      Erase chars_to_erase
-    ]
-
-  let apply screen d =
+      else CoordMap.add coord { char = None; highlight = b.Screen.cursor = Some coord } acc
+    ) a.Screen.chars cells in
+    [ Update cells ]
+  
+let apply screen d =
     match d with
-    | Write chars_to_draw ->
-      let chars = CoordMap.fold CoordMap.add chars_to_draw screen.Screen.chars in
-      { screen with Screen.chars }
-    | Erase chars_to_erase ->
-      let chars = CoordSet.fold CoordMap.remove chars_to_erase screen.Screen.chars in
-      { screen with Screen.chars }
+    | Update cells ->
+      let chars, cursor = CoordMap.fold (fun coord cell (chars, cursor) ->
+        let chars = match cell.char with
+          | Some char -> CoordMap.add coord char screen.Screen.chars
+          | None -> CoordMap.remove coord screen.Screen.chars in
+        let cursor = if cell.highlight then Some coord else cursor in
+        chars, cursor
+      ) cells (screen.Screen.chars, screen.Screen.cursor) in
+      { screen with Screen.chars; cursor }
     | Scroll lines ->
       let chars = CoordMap.fold (fun coord char acc ->
         let coord' = fst coord + lines, snd coord in
         CoordMap.add coord' char acc
       ) screen.Screen.chars CoordMap.empty in
-      { screen with Screen.chars }
+      let cursor = match screen.Screen.cursor with
+      | None -> None
+      | Some x -> Some (fst x + lines, snd x) in
+      { screen with Screen.chars; Screen.cursor }
 
   let draw initial_window initial_console current_window current_console =
     (* without moving the window, refresh the currently visible content *)
