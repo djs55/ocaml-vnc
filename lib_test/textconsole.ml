@@ -93,18 +93,10 @@ let string_of_cell c =
     (match c.char with None -> "None" | Some x -> String.make 1 (char_of_int x))
   c.highlight
 
-module CellMap = struct 
-  include Map.Make(struct
-    type t = cell
-    let compare = compare
-  end)
-(*
-    let of_screen s =
-      CoordMap.fold (fun coord _ acc ->
-        add (cell s coord) coord acc
-      ) s.Screen.chars empty
-*)
-end
+module CellMap = Map.Make(struct
+  type t = cell
+  let compare = compare
+end)
 
 module Screen = struct
   type t = {
@@ -129,16 +121,6 @@ module Screen = struct
       else cells, coords
     ) console.Console.chars (CoordMap.empty, CellMap.empty) in
     { cells; coords; rows; cols }
-
-(*
-  let cell screen coord =
-    let char =
-      if CoordMap.mem coord screen.Screen.chars
-      then Some (CoordMap.find coord screen.Screen.chars)
-      else None in
-    let highlight = screen.Screen.cursor = Some coord in
-    { char; highlight }
-*)
 
   let dump t =
     for row = 0 to t.rows - 1 do
