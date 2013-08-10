@@ -73,29 +73,25 @@ end
 
 module Screen : sig
   (** Represents a set of visible characters *)
-  type t = {
-    chars: int CoordMap.t;  (** the visible characters in screen co-ordinates *)
-    cursor: Coord.t option; (** the cursor position in screen co-ordinates *)
-    rows: int;              (** the number of visible rows *)
-    cols: int;              (** the number of visible columns *)
-  }
+  type t
 
   val make: Console.t -> Window.t -> t
   (** [make console window] extracts the visible part of [console] according
       to [window] *)
 end
 
+type cell = {
+  char: int option;      (** visible symbol or 'glyph' *)
+  highlight: bool;
+}
+
 module Delta : sig
   (** Represents a drawing operation to update the state of a Screen *)
 
-  type cell = {
-    char: int option;      (** visible symbol or 'glyph' *)
-    highlight: bool;
-  }
-
   type t =
-    | Update of Coord.t * cell (** single character cell updates *)
-    | Scroll of int            (** a number of lines to scroll (+ve means down) *)
+    | Update of Coord.t * cell  (** single character cell updates *)
+    | Copy of Coord.t * Coord.t (** copy an existing character cell *)
+    | Scroll of int             (** a number of lines to scroll (+ve means down) *)
 
   val to_string: t -> string
   (** [to_string t] pretty-prints [t] *)

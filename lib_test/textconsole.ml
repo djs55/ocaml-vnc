@@ -83,10 +83,33 @@ module Window = struct
 
 end
 
+type cell = {
+  char: int option;
+  highlight: bool;
+}
+
+let string_of_cell c =
+  Printf.sprintf "char = %s; highlight = %b"
+    (match c.char with None -> "None" | Some x -> String.make 1 (char_of_int x))
+  c.highlight
+
+module CellMap = struct 
+  include Map.Make(struct
+    type t = cell
+    let compare = compare
+  end)
+(*
+    let of_screen s =
+      CoordMap.fold (fun coord _ acc ->
+        add (cell s coord) coord acc
+      ) s.Screen.chars empty
+*)
+end
+
 module Screen = struct
   type t = {
-    chars: int CoordMap.t;
-    cursor: Coord.t option;
+    cells: cell CoordMap.t;
+    coords: Coord.t CellMap.t;
     rows: int;
     cols: int;
   }
@@ -96,21 +119,37 @@ module Screen = struct
     let rows = window.Window.rows in
     let cols = console.Console.cols in
 
-    let chars = CoordMap.fold (fun (row, col) char acc ->
-      if row >= start_row && (row < (start_row + rows))
-      then CoordMap.add (row - start_row, col) char acc
-      else acc
-    ) console.Console.chars CoordMap.empty in
     let y, x = fst console.Console.cursor - start_row, snd console.Console.cursor in
     let cursor = if y < 0 || y >= rows || x < 0 || x >= cols then None else Some (y, x) in
-    { chars; cursor; rows; cols }
+
+    let cells, coords = CoordMap.fold (fun (row, col) char (cells, coords) ->
+      if row >= start_row && (row < (start_row + rows))
+      then
+        let cell = { char = Some char; highlight = cursor = Some (row, col) } in
+        let coord = row - start_row, col in
+        let cells = CoordMap.add coord cell cells in
+        let coords = CellMap.add cell coord coords in
+        cells, coords
+      else cells, coords
+    ) console.Console.chars (CoordMap.empty, CellMap.empty) in
+    { cells; coords; rows; cols }
+
+(*
+  let cell screen coord =
+    let char =
+      if CoordMap.mem coord screen.Screen.chars
+      then Some (CoordMap.find coord screen.Screen.chars)
+      else None in
+    let highlight = screen.Screen.cursor = Some coord in
+    { char; highlight }
+*)
 
   let dump t =
     for row = 0 to t.rows - 1 do
       for col = 0 to t.cols - 1 do
         try
-          let c = CoordMap.find (row, col) t.chars in
-          print_string (String.make 1 (char_of_int c))
+          let c = CoordMap.find (row, col) t.cells in
+          print_string (String.make 1 (match c.char with None -> ' ' | Some x -> char_of_int x))
         with Not_found -> ()
       done;
       print_string "\n"
@@ -118,33 +157,56 @@ module Screen = struct
 end
 
 module Delta = struct
-  type cell = {
-    char: int option;
-    highlight: bool;
-  }
-
   type t =
     | Update of Coord.t * cell
+    | Copy  of Coord.t * Coord.t
     | Scroll of int
 
   let to_string = function
     | Scroll x -> Printf.sprintf "Scroll %d" x
     | Update (coord, cell) ->
-      Printf.sprintf "Update %d,%d char = %s highlight = %b"
-        (fst coord) (snd coord)
-        (match cell.char with None -> "None" | Some x -> String.make 1 (char_of_int x))
-        cell.highlight
+      Printf.sprintf "Update %d,%d %s"
+        (fst coord) (snd coord) (string_of_cell cell)
+    | Copy (coord, from) ->
+      Printf.sprintf "Copy   %d,%d from %d,%d"
+        (fst coord) (snd coord) (fst from) (snd from)
+
+  let rec apply screen d =
+    match d with
+    | Update (coord, cell) ->
+      (* If we change a cell which is already bound then we
+         must invalidate any entry in our 'cells' map. *)
+      let coords =
+        if not(CoordMap.mem coord screen.Screen.cells)
+        || (CoordMap.find coord screen.Screen.cells = cell)
+        then screen.Screen.coords
+        else
+          let existing = CoordMap.find coord screen.Screen.cells in
+          CellMap.remove existing screen.Screen.coords in
+      let cells = CoordMap.add coord cell screen.Screen.cells in
+      { screen with Screen.cells; coords }
+    | Copy (coord, from) ->
+      let cell = CoordMap.find from screen.Screen.cells in
+      apply screen (Update (coord, cell))
+    | Scroll lines ->
+      let cells = CoordMap.fold (fun coord cell acc ->
+        let coord' = fst coord + lines, snd coord in
+        CoordMap.add coord' cell acc
+      ) screen.Screen.cells CoordMap.empty in
+      let coords = CellMap.fold (fun cell coord acc ->
+        let coord' = fst coord + lines, snd coord in
+        CellMap.add cell coord' acc
+      ) screen.Screen.coords CellMap.empty in
+      { screen with Screen.cells; coords }
 
   let difference invalidate a b =
-    let cells = CoordMap.empty in
-    (* unhighlight the old cursor location *)
+
     let draw coord map =
-      let char =
-        if CoordMap.mem coord b.Screen.chars
-        then Some (CoordMap.find coord b.Screen.chars)
-        else None in
-      let highlight = b.Screen.cursor = Some coord in
-      CoordMap.add coord { char; highlight } map in
+      if CoordMap.mem coord b.Screen.cells
+      then CoordMap.add coord (CoordMap.find coord b.Screen.cells) map
+      else map in
+
+    let cells = CoordMap.empty in
     let cells =
       if invalidate then begin
         let rec loop acc row col =
@@ -153,46 +215,31 @@ module Delta = struct
           else loop (draw (row, col) acc) row (col + 1) in
         loop CoordMap.empty 0 0
       end else begin
-        let cells = match a.Screen.cursor with
-        | None -> cells
-        | Some x -> draw x cells in
-        let cells = match b.Screen.cursor with
-        | None -> cells
-        | Some x -> draw x cells in
-        let cells = CoordMap.fold (fun coord char acc ->
-          if CoordMap.mem coord a.Screen.chars && CoordMap.find coord a.Screen.chars = char
+        let cells = CoordMap.fold (fun coord cell acc ->
+          if CoordMap.mem coord a.Screen.cells && CoordMap.find coord a.Screen.cells = cell
           then acc (* already present *)
           else draw coord acc
-        ) b.Screen.chars cells in
-        let cells = CoordMap.fold (fun coord char acc ->
-          if CoordMap.mem coord b.Screen.chars 
+        ) b.Screen.cells cells in
+        let cells = CoordMap.fold (fun coord cell acc ->
+          if CoordMap.mem coord b.Screen.cells
           then acc (* still present *)
           else draw coord acc
-        ) a.Screen.chars cells
+        ) a.Screen.cells cells
         in cells
       end in
-    CoordMap.fold (fun coord cell acc ->
-      Update (coord, cell) :: acc
-    ) cells []
+    let a =
+      if invalidate
+      then { a with Screen.coords = CellMap.empty }
+      else a in
+    fst (CoordMap.fold (fun coord cell (drawing_ops, a) ->
+      let op =
+        if CellMap.mem cell a.Screen.coords
+        then Copy (coord, CellMap.find cell a.Screen.coords)
+        else Update (coord, cell) in
+      let a = apply a op in
+      op :: drawing_ops, a
+    ) cells ([], a))
   
-let apply screen d =
-    match d with
-    | Update (coord, cell) ->
-      let chars = match cell.char with
-      | Some char -> CoordMap.add coord char screen.Screen.chars
-      | None -> CoordMap.remove coord screen.Screen.chars in
-      let cursor = if cell.highlight then Some coord else screen.Screen.cursor in
-      { screen with Screen.chars; cursor }
-    | Scroll lines ->
-      let chars = CoordMap.fold (fun coord char acc ->
-        let coord' = fst coord + lines, snd coord in
-        CoordMap.add coord' char acc
-      ) screen.Screen.chars CoordMap.empty in
-      let cursor = match screen.Screen.cursor with
-      | None -> None
-      | Some x -> Some (fst x + lines, snd x) in
-      { screen with Screen.chars; Screen.cursor }
-
   let draw invalidate initial_window initial_console current_window current_console =
     (* without moving the window, refresh the currently visible content *)
     let offset = Window.get_scroll_offset initial_window initial_console in

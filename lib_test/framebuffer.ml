@@ -85,7 +85,14 @@ let make_full_update bpp drawing_operations font x y w h =
     } in
     updates := update :: !updates in
 
-  let char (row, col) { Delta.highlight = highlight; char = char } =
+  let copy (row, col) (from_row, from_col) =
+    if row >= y' && (row < (y' + h')) && (col >= x') && (col < (x' + w')) then begin
+      let x = from_col * font_width in
+      let y = from_row * font_height in
+      push (row, col) (Encoding.CopyRect { CopyRect.x; y })
+    end in
+
+  let char (row, col) { highlight = highlight; char = char } =
     if row >= y' && (row < (y' + h')) && (col >= x') && (col < (x' + w')) then begin
       let encoding = match char with
         | None ->
@@ -125,6 +132,7 @@ let make_full_update bpp drawing_operations font x y w h =
     end in
     List.iter (function
       | Delta.Update (coord, x) -> char coord x
+      | Delta.Copy   (coord, from) -> copy coord from
       | Delta.Scroll x -> scroll x
     ) drawing_operations;
   (* Updates must be ordered or else we may issue a CopyRect before the
