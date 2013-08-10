@@ -66,7 +66,6 @@ let write_raw_char bpp font highlight c =
 let make_full_update bpp drawing_operations font x y w h =
   let updates = ref [] in
   let bytes_per_pixel = bpp / 8 in
-  let painted_already = Hashtbl.create 128 in
   let font_width = width_of_font font in
   let font_height = height_of_font font in
 
@@ -101,15 +100,7 @@ let make_full_update bpp drawing_operations font x y w h =
             rectangles = []
           }
         | Some c ->
-          if Hashtbl.mem painted_already (c, highlight) then begin
-            let row, col = Hashtbl.find painted_already (c, highlight) in
-            let x = col * font_width in
-            let y = row * font_height in
-            Encoding.CopyRect { CopyRect.x; y }
-          end else begin
-            Hashtbl.replace painted_already (c, highlight) (row, col);
             write_raw_char bpp font highlight c
-          end
       in
       push (row, col) encoding
     end in
