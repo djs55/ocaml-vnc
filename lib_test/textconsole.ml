@@ -188,11 +188,11 @@ module Delta = struct
       apply screen (Update (coord, cell))
     | Scroll lines ->
       let cells = CoordMap.fold (fun coord cell acc ->
-        let coord' = fst coord + lines, snd coord in
+        let coord' = fst coord - lines, snd coord in
         CoordMap.add coord' cell acc
       ) screen.Screen.cells CoordMap.empty in
       let coords = CellMap.fold (fun cell coord acc ->
-        let coord' = fst coord + lines, snd coord in
+        let coord' = fst coord - lines, snd coord in
         CellMap.add cell coord' acc
       ) screen.Screen.coords CellMap.empty in
       { screen with Screen.cells; coords }
