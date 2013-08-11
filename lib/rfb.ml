@@ -476,16 +476,20 @@ end
 module SetEncodings = struct
   type t = Encoding.t list
 
+  cstruct hdr {
+    uint8_t padding;
+    uint16_t nr_encodings
+  } as big_endian
+
   let unmarshal (s: Channel.fd) =
-    really_read s 1 >>= fun _ -> (* padding *)
-    really_read s 2 >>= fun num ->
-    let num = UInt16.unmarshal num in
+    really_read s sizeof_hdr >>= fun x ->
+    let num = get_hdr_nr_encodings x in
     let rec loop acc n =
       if n > num
       then return (List.rev acc)
       else
         really_read s 4 >>= fun x ->
-        match Encoding.of_int32 (UInt32.unmarshal x) with
+        match Encoding.of_int32 (Cstruct.BE.get_uint32 x 0) with
         | None -> loop acc (n + 1)
         | Some e -> loop (e :: acc) (n + 1) in
     loop [] 1
