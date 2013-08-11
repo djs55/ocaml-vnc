@@ -12,98 +12,6 @@
  * GNU Lesser General Public License for more details.
  *)
 
-(* TODO:
-   1. Check for overflow in UInt32/UInt64 
-*)
-
-exception Truncated
-
-let _marshal (x: int list) =
-  let chars = List.map char_of_int (List.map (fun x -> x land 0xff) x) in
-  let buf = String.make (List.length chars) '\000' in
-  List.iteri (fun i c -> buf.[i] <- c) chars;
-  buf
-let _unmarshal (x: string) =
-  let rec explode acc = function
-    | -1 -> acc
-    | n -> explode (x.[n] :: acc) (n - 1) in
- List.map int_of_char (explode [] (String.length x - 1))
-
-let blit src srcoff dst dstoff len = 
-    (* Printf.printf "blit src_len=%d srcoff=%d dst_len=%d dstoff=%d len=%d\n" (String.length src) srcoff (String.length dst) dstoff len;  *)
-    String.blit src srcoff dst dstoff len
-
-module UInt16 = struct
-  type t = int
-
-  let (||) = (lor)
-  let (<<) = (lsl)
-  let (>>) = (lsr)
-  let (&&) = (land)
-
-  let marshal (x: t) : string =
-    _marshal [ x >> 8; x ]
-  let marshal_at (buf: string) (off: int) (x: t) = 
-    let raw = marshal x in
-    blit raw 0 buf off 2;
-    off + 2
-  let unmarshal (x: Cstruct.t) : t =
-    if Cstruct.len x < 2 then raise Truncated;
-    let msb = Cstruct.get_uint8 x 0 in
-    let lsb = Cstruct.get_uint8 x 1 in
-    (msb lsl 8) || lsb
-
-  let prettyprint = string_of_int
-  let to_int x = x
-  let of_int x = x
-end
-
-module UInt32 = struct
-  type t = int32
-
-  let (||) = Int32.logor
-  let (lsl) = Int32.shift_left
-  let (>>) = Int32.shift_right
-  let (&&) = Int32.logand
-  
-  let marshal (x: t) : string = 
-    _marshal (List.map Int32.to_int [ x >> 24; x >> 16; x >> 8; x ])
-  let marshal_at (buf: string) (off: int) (x: t) = 
-    let raw = marshal x in
-    blit raw 0 buf off 4;
-    off + 4
-  let unmarshal (x: Cstruct.t) : t =
-    if Cstruct.len x < 4 then raise Truncated;
-    let a = Int32.of_int (Cstruct.get_uint8 x 0) in
-    let b = Int32.of_int (Cstruct.get_uint8 x 1) in
-    let c = Int32.of_int (Cstruct.get_uint8 x 2) in
-    let d = Int32.of_int (Cstruct.get_uint8 x 3) in
-    (a lsl 24) || (b lsl 16) || (c lsl 8) || d
-	
-  let prettyprint = string_of_int
-  let to_int32 x = x
-  let of_int32 x = x
-end
-
-module UInt64 = struct
-  type t = int64
-
-  let (||) = Int64.logor
-  let (lsl) = Int64.shift_left
-  let (>>) = Int64.shift_right
-  let (&&) = Int64.logand
-
-  let marshal (x: t) : string = 
-    _marshal (List.map Int64.to_int [ x >> 56; x >> 48; x >> 40; x >> 32; x >> 24; x >> 16; x >> 8; x ])
-  let unmarshal (x: string) : t = match List.map Int64.of_int (_unmarshal x) with
-    | [ a; b; c; d; e; f; g; h ] -> (a lsl 56 ) || (b lsl 48) || (c lsl 40) || (d lsl 32) || (e lsl 24) || (f lsl 16) || (g lsl 8) || h
-    | _ -> raise Truncated
-
-  let prettyprint = Int64.to_string
-  let to_int64 x = x
-  let of_int64 x = x
-end
-
 module type ASYNC = sig
   type 'a t
 
@@ -704,7 +612,7 @@ module SetColourMapEntries = struct
 end
 
 module KeyEvent = struct
-  type t = { down: bool; key: UInt32.t }
+  type t = { down: bool; key: int32 }
 
   cstruct hdr {
     uint8_t down;
