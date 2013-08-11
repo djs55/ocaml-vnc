@@ -411,13 +411,23 @@ end
 
 module SetPixelFormat = struct
   type t = PixelFormat.t
+
+  cstruct hdr {
+    uint8_t padding[3]
+  } as big_endian
+
+  let sizeof _ = sizeof_hdr + PixelFormat.sizeof_hdr
+
+  let marshal_at (x: t) buf =
+    PixelFormat.marshal_at x (Cstruct.shift buf sizeof_hdr)
+
   let marshal (x: t) = 
-    let ty = "\000" in
-    let padding = "\000\000\000" in
-    ty ^ padding ^ (PixelFormat.marshal x)
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
+    marshal_at x buf;
+    Cstruct.to_string buf
 
   let unmarshal (s: Channel.fd) =
-    really_read s 3 >>= fun _ ->
+    really_read s sizeof_hdr >>= fun _ ->
     PixelFormat.unmarshal s
 
   let prettyprint (x: t) = 
