@@ -120,6 +120,17 @@ module Screen = struct
         cells, coords
       else cells, coords
     ) console.Console.chars (CoordMap.empty, CellMap.empty) in
+    (* add the cursor (which may be on an empty cell) *)
+    let cells, coords =
+      let cursor = console.Console.cursor in
+      let cursor = fst cursor - start_row, snd cursor in
+      if CoordMap.mem cursor cells
+      then cells, coords
+      else
+        let cell = { char = None; highlight = true } in
+        let cells = CoordMap.add cursor cell cells in
+        let coords = CellMap.add cell cursor coords in
+        cells, coords in
     { cells; coords; rows; cols }
 
   let dump t =
