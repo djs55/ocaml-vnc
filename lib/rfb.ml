@@ -684,12 +684,19 @@ end
 module PointerEvent = struct
   type t = { mask: int; x: int; y: int }
 
+  cstruct hdr {
+    uint8_t mask;
+    uint16_t x;
+    uint16_t y
+  } as big_endian
+
   let unmarshal (s: Channel.fd) =
-    really_read s 5 >>= fun buf ->
-    return { mask = Cstruct.get_uint8 buf 0;
-      x = UInt16.unmarshal (Cstruct.sub buf 1 2);
-      y = UInt16.unmarshal (Cstruct.sub buf 3 2);
-    }
+    really_read s sizeof_hdr >>= fun buf ->
+    let mask = get_hdr_mask buf in
+    let x = get_hdr_x buf in
+    let y = get_hdr_y buf in
+    return { mask; x; y }
+
   let prettyprint (x: t) = 
     Printf.sprintf "PointerEvent { mask = %d; x = %d; y = %d }"
       x.mask x.x x.y
