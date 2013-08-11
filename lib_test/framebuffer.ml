@@ -63,8 +63,7 @@ let write_raw_char bpp font highlight c =
     ) pixels;
   FramebufferUpdate.Encoding.Raw { FramebufferUpdate.Raw.buffer = buffer }
 
-let make_full_update bpp drawing_operations font x y w h =
-  let updates = ref [] in
+let make_update bpp drawing_operations font x y w h =
   let bytes_per_pixel = bpp / 8 in
   let font_width = width_of_font font in
   let font_height = height_of_font font in
@@ -76,59 +75,51 @@ let make_full_update bpp drawing_operations font x y w h =
   let h' = (h + font_height - 1) / font_height in
 
   let open FramebufferUpdate in
-  let push (row, col) encoding =
-    let x = col * font_width in
-    let y = row * font_height in
-    let update = {
-      x; y; w = font_width; h = font_height; encoding;
-    } in
-    updates := update :: !updates in
 
-  let copy (row, col) (from_row, from_col) =
-    if row >= y' && (row < (y' + h')) && (col >= x') && (col < (x' + w')) then begin
+  let character (row, col) encoding =
+    (* the cursor can end up just outside the visible window. Perhaps we
+       should generalise this into clipping on framebuffer coords? *)
+    if row >= y' && (row < (y' + h')) && (col >= x') && (col < (x' + w')) then [{
+      x = col * font_width; y = row * font_height;
+      w = font_width; h = font_height; encoding;
+    }] else [] in
+ 
+  let copy (from_row, from_col) =
       let x = from_col * font_width in
       let y = from_row * font_height in
-      push (row, col) (Encoding.CopyRect { CopyRect.x; y })
-    end in
+      Encoding.CopyRect { CopyRect.x; y } in
 
-  let char (row, col) { highlight = highlight; char = char } =
-    if row >= y' && (row < (y' + h')) && (col >= x') && (col < (x' + w')) then begin
-      let encoding = match char with
-        | None ->
-          Encoding.RRE {
-            RRE.background = String.make bytes_per_pixel (if highlight then '\255' else '\000');
-            rectangles = []
-          }
-        | Some c ->
-            write_raw_char bpp font highlight c
-      in
-      push (row, col) encoding
-    end in
+  let write { char = char; highlight = highlight } = match char with
+   | None ->
+      Encoding.RRE {
+        RRE.background = String.make bytes_per_pixel (if highlight then '\255' else '\000');
+        rectangles = []
+     }
+   | Some c ->
+     write_raw_char bpp font highlight c in
 
   let scroll lines =
-    if lines > 0 then begin
-      for y = 1 to font_height do
-        let encoding = Encoding.CopyRect { CopyRect.x = 0; y = lines } in
-        let update = {
-          x = 0; y = 0; w = w; h = h - lines; encoding
-        } in
-        updates := update :: !updates;
-      done
-    end else if lines < 0 then begin
-      let encoding = Encoding.CopyRect { CopyRect.x = 0; y = 0 } in
-      let update = {
-        x = 0; y = -lines * font_height; w = w; h = -lines * font_height; encoding
-      } in
-      updates := update :: !updates
-    end in
-    List.iter (function
-      | Delta.Update (coord, x) -> char coord x
-      | Delta.Copy   (coord, from) -> copy coord from
-      | Delta.Scroll x -> scroll x
-    ) drawing_operations;
-  (* Updates must be ordered or else we may issue a CopyRect before the
-     underlying data is written. *)
-  List.rev !updates
+    let down = {
+      x = 0; y = 0; w = w; h = h - lines;
+      encoding = Encoding.CopyRect { CopyRect.x = 0; y = lines }
+    } in
+    let up = {
+      x = 0; y = -lines * font_height; w = w; h = -lines * font_height;
+      encoding = Encoding.CopyRect { CopyRect.x = 0; y = 0 }
+    } in
+    let rec animate acc = function
+      | 0 -> acc
+      | n -> animate ((if lines > 0 then down else up) :: acc) (n-1) in
+    animate [] font_height in
+
+    List.rev (List.fold_left (fun acc d -> match d with
+      | Delta.Update (coord, x) ->
+        character coord (write x) @ acc
+      | Delta.Copy (coord, from) ->
+        character coord (copy from) @ acc
+      | Delta.Scroll lines ->
+        scroll lines @ acc
+    ) [] drawing_operations)
 
 let console = ref (Console.make 0)
 let console_m = Lwt_mutex.create ()
@@ -164,7 +155,7 @@ let server (s: Lwt_unix.file_descr) window font =
         while_lwt !updates = [] do
           lwt new_console = wait_for_update !client_remembers in
           let drawing_operations = Delta.draw false window !client_remembers window new_console in
-          updates := make_full_update !bpp drawing_operations font 0 0 w h;
+          updates := make_update !bpp drawing_operations font 0 0 w h;
           client_remembers := new_console;
           return ()
         done in
@@ -208,7 +199,7 @@ let server (s: Lwt_unix.file_descr) window font =
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false; x; y; width; height } ->
       let c = !console in
       let drawing_operations = Delta.draw true window c window c in
-      let update = make_full_update !bpp drawing_operations font x y width height in
+      let update = make_update !bpp drawing_operations font x y width height in
       client_remembers := c;
       if !debug then begin
         print_endline "-> FramebufferUpdate";
