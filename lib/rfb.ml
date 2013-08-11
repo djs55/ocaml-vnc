@@ -705,9 +705,14 @@ end
 module ClientCutText = struct
   type t = string
 
+  cstruct hdr {
+    uint8_t padding[3];
+    uint32_t length
+  } as big_endian
+
   let unmarshal (s: Channel.fd) =
-    really_read s 7 >>= fun buf -> 
-    let length = UInt32.unmarshal (Cstruct.sub buf 3 4) in
+    really_read s sizeof_hdr >>= fun buf ->
+    let length = get_hdr_length buf in
     really_read s (Int32.to_int length) >>= fun buf ->
     return (Cstruct.to_string buf)
   let prettyprint (x: t) = 
