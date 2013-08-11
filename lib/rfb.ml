@@ -134,7 +134,7 @@ module ProtocolVersion = struct
     uint8_t dot;
     uint8_t minor[3];
     uint8_t newline
-  } as little_endian
+  } as big_endian
 
   let marshal (x: t) =
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout sizeof_hdr)) in
@@ -162,7 +162,7 @@ module Error = struct
 
   cstruct hdr {
     uint32_t length
-  } as little_endian
+  } as big_endian
 
   let sizeof (x: t) = sizeof_hdr + (String.length x)
 
