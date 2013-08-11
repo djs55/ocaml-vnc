@@ -19,8 +19,9 @@ let h = 480
 module Server = Rfb.Make(Rfb_unix)
 open Server
 
-let server (s: Unix.file_descr) = 
-  Server.handshake "random" w h s;
+let server (s: Unix.file_descr) =
+  let pf = PixelFormat.true_colour_default Sys.big_endian in
+  Server.handshake "random" pf w h s;
 
   let bpp = ref 32 in
   let update_thread = ref None in

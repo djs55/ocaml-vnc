@@ -559,7 +559,7 @@ end
 let white = (255, 255, 255)
 let black = (0, 0, 0)
 
-let handshake name w h (s: Channel.fd) =
+let handshake name pixelformat w h (s: Channel.fd) =
   let ver = { ProtocolVersion.major = 3; minor = 3 } in
   really_write s (ProtocolVersion.marshal ver) >>= fun () ->
   ProtocolVersion.unmarshal s >>= fun ver' ->
@@ -568,8 +568,7 @@ let handshake name w h (s: Channel.fd) =
   ClientInit.unmarshal s >>= fun ci ->
   if ci then print_endline "Client requests a shared display"
   else print_endline "Client requests a non-shared display";
-  let si = { ServerInit.name;
-	     width = w; height = h;
-	     pixelformat = PixelFormat.true_colour_default false } in
+  let si = { ServerInit.name; pixelformat;
+	     width = w; height = h } in
   really_write s (ServerInit.marshal si)
 end

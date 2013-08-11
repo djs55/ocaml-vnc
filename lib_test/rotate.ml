@@ -140,8 +140,9 @@ let animate fps f =
     then Thread.delay (ideal_delay -. took)
   done
 
-let server (s: Unix.file_descr) = 
-  Server.handshake "rotate" w h s;
+let server (s: Unix.file_descr) =
+  let pf = PixelFormat.true_colour_default Sys.big_endian in
+  Server.handshake "rotate" pf w h s;
 
   let bpp = ref 32 in
   let last_update_seen = ref !update_counter in

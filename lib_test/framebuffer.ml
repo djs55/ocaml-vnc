@@ -36,10 +36,10 @@ let width_of_font font =
   let a = get_accelerator font in
   a.Accelerator.min_bounds.Metrics.character_width
 
-let write_raw_char bpp font highlight c =
+let write_raw_char pf font highlight c =
   let font_width = width_of_font font in
   let font_height = height_of_font font in
-  let bytes_per_pixel = bpp / 8 in
+  let bytes_per_pixel = pf.PixelFormat.bpp / 8 in
   let buffer = String.create (font_width * font_height * bytes_per_pixel) in
   let e = Pcf.Encoding.of_int c in
   let pixels = match Pcf.Glyph.get_bitmap font e with
@@ -63,8 +63,8 @@ let write_raw_char bpp font highlight c =
     ) pixels;
   FramebufferUpdate.Encoding.Raw { FramebufferUpdate.Raw.buffer = buffer }
 
-let make_update bpp drawing_operations font x y w h =
-  let bytes_per_pixel = bpp / 8 in
+let make_update pf drawing_operations font x y w h =
+  let bytes_per_pixel = pf.PixelFormat.bpp / 8 in
   let font_width = width_of_font font in
   let font_height = height_of_font font in
 
@@ -96,7 +96,7 @@ let make_update bpp drawing_operations font x y w h =
         rectangles = []
      }
    | Some c ->
-     write_raw_char bpp font highlight c in
+     write_raw_char pf font highlight c in
 
   let scroll lines =
     let down = {
@@ -139,9 +139,9 @@ let wait_for_update c =
     )
 
 let server (s: Lwt_unix.file_descr) window font = 
-  lwt () = Server.handshake "console" w h s in
+  let pf = ref (PixelFormat.true_colour_default Sys.big_endian) in
+  lwt () = Server.handshake "console" !pf w h s in
 
-  let bpp = ref 32 in
   let client_remembers = ref (Console.make 0) in
   let m = Lwt_mutex.create () in
   let framebuffer_thread = ref None in
@@ -155,7 +155,7 @@ let server (s: Lwt_unix.file_descr) window font =
         while_lwt !updates = [] do
           lwt new_console = wait_for_update !client_remembers in
           let drawing_operations = Delta.draw false window !client_remembers window new_console in
-          updates := make_update !bpp drawing_operations font 0 0 w h;
+          updates := make_update !pf drawing_operations font 0 0 w h;
           client_remembers := new_console;
           return ()
         done in
@@ -179,9 +179,9 @@ let server (s: Lwt_unix.file_descr) window font =
     Lwt_mutex.with_lock m (fun () ->
     if !debug then print_endline ("<- " ^ (Request.prettyprint req));
     match req with
-    | Request.SetPixelFormat pf ->
-        Printf.printf "Setting pixel format to %s\n" (PixelFormat.to_string pf);
-	bpp := pf.PixelFormat.bpp;
+    | Request.SetPixelFormat pf' ->
+        Printf.printf "Setting pixel format to %s\n" (PixelFormat.to_string pf');
+	pf := pf';
         return ()
     | Request.KeyEvent { KeyEvent.down = false; key = key } ->
         (try_lwt
@@ -199,7 +199,7 @@ let server (s: Lwt_unix.file_descr) window font =
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false; x; y; width; height } ->
       let c = !console in
       let drawing_operations = Delta.draw true window c window c in
-      let update = make_update !bpp drawing_operations font x y width height in
+      let update = make_update !pf drawing_operations font x y width height in
       client_remembers := c;
       if !debug then begin
         print_endline "-> FramebufferUpdate";
