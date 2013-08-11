@@ -164,11 +164,17 @@ module Error = struct
     uint32_t length
   } as little_endian
 
+  let sizeof (x: t) = sizeof_hdr + (String.length x)
+
+  let marshal_at (x: t) buf =
+    let x' = String.length x in
+    set_hdr_length buf (Int32.of_int x');
+    Cstruct.blit_from_string x 0 buf sizeof_hdr x'
+
   let marshal (x: t) =
     let x' = String.length x in
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof_hdr + x'))) in
-    set_hdr_length buf (Int32.of_int x');
-    Cstruct.blit_from_string x 0 buf sizeof_hdr x';
+    marshal_at x buf;
     Cstruct.to_string buf
 
   let unmarshal (s: Channel.fd) =
@@ -189,18 +195,30 @@ module SecurityType = struct
     VNCAUTH
   } as uint32_t
 
-  cstruct c {
+  cstruct hdr {
     uint32_t ty
-  } as little_endian
+  } as big_endian
 
-  let marshal (x: t) = match x with
-    | Failed x -> UInt32.marshal 0l ^ (Error.marshal x)
-    | NoSecurity -> UInt32.marshal 1l
-    | VNCAuth -> UInt32.marshal 2l
+  let sizeof (x: t) = match x with
+    | Failed x -> sizeof_hdr + (Error.sizeof x)
+    | NoSecurity | VNCAuth -> sizeof_hdr
+
+  let marshal (x: t) =
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
+    begin match x with
+    | Failed x ->
+      set_hdr_ty buf (code_to_int FAILED);
+      Error.marshal_at x (Cstruct.shift buf sizeof_hdr)
+    | NoSecurity ->
+      set_hdr_ty buf (code_to_int NOSECURITY)
+    | VNCAuth ->
+      set_hdr_ty buf (code_to_int VNCAUTH)
+    end;
+    Cstruct.to_string buf
 
   let unmarshal (s: Channel.fd) =
-    really_read s 4 >>= fun x -> 
-    match int_to_code (get_c_ty x) with
+    really_read s sizeof_hdr >>= fun x -> 
+    match int_to_code (get_hdr_ty x) with
     | None -> return (`Error(Failure "unknown SecurityType"))
     | Some FAILED ->
       Error.unmarshal s >>= fun x ->
