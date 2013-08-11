@@ -214,6 +214,11 @@ module PixelFormat = struct
 	     red_shift: int;
 	     green_shift: int;
 	     blue_shift: int }
+
+  let to_string t =
+    Printf.sprintf "{ bpp=%d; depth=%d; big_endian=%b; true_colour=%b; red_max=%d; green_max=%d; blue_max=%d; red_shift=%d; green_shift=%d; blue_shift=%d }"
+    t.bpp t.depth t.big_endian t.true_colour t.red_max t.green_max t.blue_max t.red_shift t.green_shift t.blue_shift
+
   let true_colour_default big_endian = {
     bpp = 32; depth = 24; big_endian = big_endian;
     true_colour = true;

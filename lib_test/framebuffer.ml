@@ -180,7 +180,7 @@ let server (s: Lwt_unix.file_descr) window font =
     if !debug then print_endline ("<- " ^ (Request.prettyprint req));
     match req with
     | Request.SetPixelFormat pf ->
-        Printf.printf "Setting pixel format to %d bpp\n" pf.PixelFormat.bpp;
+        Printf.printf "Setting pixel format to %s\n" (PixelFormat.to_string pf);
 	bpp := pf.PixelFormat.bpp;
         return ()
     | Request.KeyEvent { KeyEvent.down = false; key = key } ->
