@@ -528,23 +528,29 @@ module FramebufferUpdate = struct
   module Raw = struct
     (* width * height * bpp *)
     type t = { buffer: string }
+
     let sizeof (x: t) = String.length x.buffer
-    let marshal (x: t) = x.buffer
-    let marshal_at (buf: string) (off: int) (x: t) = 
-        let length = sizeof x in
-        blit x.buffer 0 buf off length;
-        off + length
+
+    let marshal_at (x: t) buf =
+      Cstruct.blit_from_string x.buffer 0 buf 0 (String.length x.buffer)
+
     let prettyprint (x: t) = 
       "FrameBufferUpdate"
   end
   module CopyRect = struct
     type t = { x: int; y: int }
-    let sizeof (x: t) = 2 + 2
-    let marshal (x: t) = 
-      UInt16.marshal x.x ^ (UInt16.marshal x.y)
-    let marshal_at (buf: string) (off: int) (x: t) = 
-      let off = UInt16.marshal_at buf off x.x in
-      UInt16.marshal_at buf off x.y 
+ 
+    cstruct hdr {
+      uint16_t x;
+      uint16_t y
+    } as big_endian
+
+    let sizeof _ = sizeof_hdr
+
+    let marshal_at (x: t) buf =
+      set_hdr_x buf x.x;
+      set_hdr_y buf x.y
+
     let prettyprint (x: t) = 
       Printf.sprintf "{ x = %d; y = %d }" x.x x.y
   end
@@ -559,12 +565,26 @@ module FramebufferUpdate = struct
       w: int;
       h: int;
     }
+
     let sizeof (x: t) =
       let pixel = String.length x.background in
       pixel + 4 + (8 + pixel) * (List.length x.rectangles)
-    let marshal (x: t) =
-      UInt32.marshal (Int32.of_int (List.length x.rectangles)) ^ x.background ^
-      (String.concat "" (List.map (fun r -> r.foreground ^ (UInt16.marshal r.x) ^ (UInt16.marshal r.y) ^ (UInt16.marshal r.w) ^ (UInt16.marshal r.h)) x.rectangles))
+
+    let marshal_at (x: t) buf =
+      Cstruct.BE.set_uint32 buf 0 (Int32.of_int (List.length x.rectangles));
+      Cstruct.blit_from_string x.background 0 buf 4 (String.length x.background);
+      let buf = Cstruct.shift buf (String.length x.background + 4) in
+      let (_: Cstruct.t) = List.fold_left (fun buf r ->
+        Cstruct.blit_from_string r.foreground 0 buf 0 (String.length r.foreground);
+        let buf = Cstruct.shift buf (String.length r.foreground) in
+        Cstruct.BE.set_uint16 buf 0 r.x;
+        Cstruct.BE.set_uint16 buf 2 r.y;
+        Cstruct.BE.set_uint16 buf 4 r.w;
+        Cstruct.BE.set_uint16 buf 6 r.h;
+        Cstruct.shift buf 8
+      ) buf x.rectangles in
+      ()
+
     let prettyprint (x: t) =
       Printf.sprintf "{ background = %s; rectangles = %d }" x.background (List.length x.rectangles) 
   end
@@ -579,21 +599,24 @@ module FramebufferUpdate = struct
       | CopyRect x -> 4 + CopyRect.sizeof x
       | RRE x -> 4 + RRE.sizeof x
       | DesktopSize -> 4
-    let marshal (x: t) = match x with
-      | Raw x -> UInt32.marshal 0l ^ (Raw.marshal x)
-      | CopyRect x -> UInt32.marshal 1l ^ (CopyRect.marshal x)
-      | RRE x -> UInt32.marshal 2l ^ (RRE.marshal x)
-      | DesktopSize -> UInt32.marshal (-223l)
-    let marshal_at (buf: string) (off: int) (x: t) = match x with
-      | Raw x -> 
-        let off = UInt32.marshal_at buf off 0l in
-        Raw.marshal_at buf off x
-      | CopyRect x -> 
-        let off = UInt32.marshal_at buf off 1l in
-        CopyRect.marshal_at buf off x
-      | RRE x -> failwith "unimplemented RRE.marshal_at"
-      | DesktopSize -> 
-        UInt32.marshal_at buf off (-223l)
+
+    cstruct hdr {
+      uint32_t ty
+    } as big_endian
+
+    let marshal_at (x: t) buf = match x with
+      | Raw x ->
+        set_hdr_ty buf 0l;
+        Raw.marshal_at x (Cstruct.shift buf sizeof_hdr)
+      | CopyRect x ->
+        set_hdr_ty buf 1l;
+        CopyRect.marshal_at x (Cstruct.shift buf sizeof_hdr)
+      | RRE x ->
+        set_hdr_ty buf 2l;
+        RRE.marshal_at x (Cstruct.shift buf sizeof_hdr)
+      | DesktopSize ->
+        set_hdr_ty buf (-223l)
+
     let prettyprint = function
       | Raw _ -> "Raw"
       | CopyRect x -> "CopyRect " ^ (CopyRect.prettyprint x)
@@ -601,26 +624,45 @@ module FramebufferUpdate = struct
       | DesktopSize -> "DesktopSize"
   end
   type t = { x: int; y: int; w: int; h: int; encoding: Encoding.t }
+
+  cstruct rectangle {
+    uint16_t x;
+    uint16_t y;
+    uint16_t width;
+    uint16_t height
+  } as big_endian
+
   let sizeof (xs: t list) = 
     let one (one: t) = 2 + 2 + 2 + 2 + (Encoding.sizeof one.encoding) in
     2 (* \000\000 *) + 2 (* length *) + (List.fold_left (+) 0 (List.map one xs))
-  let marshal_at (buf: string) (off: int) (xs: t list) = 
-    let off = UInt16.marshal_at buf off 0 in
-    let off = UInt16.marshal_at buf off (List.length xs) in
-    let update (buf: string) (off: int) (one: t) = 
-        let off = UInt16.marshal_at buf off one.x in
-        let off = UInt16.marshal_at buf off one.y in
-        let off = UInt16.marshal_at buf off one.w in
-        let off = UInt16.marshal_at buf off one.h in
-        Encoding.marshal_at buf off one.encoding in
-    List.fold_left (fun off x -> update buf off x) off xs
+
+  let marshal_rectangle_at (x: t) buf =
+    set_rectangle_x buf x.x;
+    set_rectangle_y buf x.y;
+    set_rectangle_width buf x.w;
+    set_rectangle_height buf x.h;
+    Encoding.marshal_at x.encoding (Cstruct.shift buf sizeof_rectangle)
+
+  cstruct hdr {
+    uint8_t ty;
+    uint8_t padding;
+    uint16_t nr_rectangles
+  } as big_endian
+
+  let marshal_at (xs: t list) buf =
+    set_hdr_ty buf 0;
+    set_hdr_nr_rectangles buf (List.length xs);
+    let (_: Cstruct.t) = List.fold_left (fun buf x ->
+      marshal_rectangle_at x buf;
+      Cstruct.shift buf (sizeof_rectangle + (Encoding.sizeof x.encoding))
+    ) (Cstruct.shift buf sizeof_hdr) xs in
+    ()
+
   let marshal (xs: t list) = 
-    let update (one: t) = 
-      let x = UInt16.marshal one.x and y = UInt16.marshal one.y in
-      let w = UInt16.marshal one.w and h = UInt16.marshal one.h in
-      x ^ y ^ w ^ h ^ (Encoding.marshal one.encoding) in
-    let length = UInt16.marshal (List.length xs) in
-    "\000\000" ^ length ^ (String.concat "" (List.map update xs))
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof xs))) in
+    marshal_at xs buf;
+    Cstruct.to_string buf
+
   let prettyprint (t: t) =
     Printf.sprintf "Rectangle {x=%d y=%d w=%d h=%d encoding=%s}"
       t.x t.y t.w t.h (Encoding.prettyprint t.encoding)
