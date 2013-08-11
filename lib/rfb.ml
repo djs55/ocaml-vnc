@@ -233,12 +233,24 @@ end
 module ClientInit = struct
   type t = bool (* shared-flag *)
 
-  let marshal (x: t) = if x then "x" else "\000"
+  cstruct hdr {
+    uint8_t shared
+  } as big_endian
+
+  let sizeof _ = sizeof_hdr
+
+  let marshal_at (x: t) buf =
+    set_hdr_shared buf (if x then 1 else 0)
+
+  let marshal (x: t) =
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
+    marshal_at x buf;
+    Cstruct.to_string buf
+
   let unmarshal (s: Channel.fd) =
-    really_read s 1 >>= fun x ->
-    return (match Cstruct.get_char x 0  with
-    | '\000' -> false
-    | _ -> true)
+    really_read s sizeof_hdr >>= fun x ->
+    let shared = get_hdr_shared x in
+    return (shared <> 0)
 end
 
 module PixelFormat = struct
