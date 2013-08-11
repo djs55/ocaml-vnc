@@ -292,20 +292,38 @@ module PixelFormat = struct
 
   let bytes_per_pixel t = int_of_bpp t.bpp / 8
 
+  cstruct hdr {
+    uint8_t bpp;
+    uint8_t depth;
+    uint8_t big_endian;
+    uint8_t true_colour;
+    uint16_t red_max;
+    uint16_t green_max;
+    uint16_t blue_max;
+    uint8_t red_shift;
+    uint8_t green_shift;
+    uint8_t blue_shift;
+    uint8_t padding[3]
+  } as big_endian
+
+  let sizeof _ = sizeof_hdr
+
+  let marshal_at (x: t) buf =
+    set_hdr_bpp buf (int_of_bpp x.bpp);
+    set_hdr_depth buf x.depth;
+    set_hdr_big_endian buf (if x.big_endian then 1 else 0);
+    set_hdr_true_colour buf (if x.true_colour then 1 else 0);
+    set_hdr_red_max buf (1 lsl x.red_max_n - 1);
+    set_hdr_green_max buf (1 lsl x.green_max_n - 1);
+    set_hdr_blue_max buf (1 lsl x.blue_max_n - 1);
+    set_hdr_red_shift buf x.red_shift;
+    set_hdr_green_shift buf x.green_shift;
+    set_hdr_blue_shift buf x.blue_shift
+
   let marshal (x: t) = 
-    let bpp = String.make 1 (char_of_int (int_of_bpp x.bpp)) in
-    let depth = String.make 1 (char_of_int x.depth) in
-    let big_endian = if x.big_endian then "x" else "\000" in
-    let true_colour = if x.true_colour then "x" else "\000" in
-    let red_max = UInt16.marshal (1 lsl x.red_max_n - 1) in
-    let green_max = UInt16.marshal (1 lsl x.green_max_n - 1) in
-    let blue_max = UInt16.marshal (1 lsl x.blue_max_n - 1) in
-    let red_shift = String.make 1 (char_of_int x.red_shift) in
-    let green_shift = String.make 1 (char_of_int x.green_shift) in
-    let blue_shift = String.make 1 (char_of_int x.blue_shift) in
-    bpp ^ depth ^ big_endian ^ true_colour ^ 
-      red_max ^ green_max ^ blue_max ^ red_shift ^ green_shift ^ blue_shift ^
-      "   " (* padding *)
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
+    marshal_at x buf;
+    Cstruct.to_string buf
 
   exception Illegal_colour_max
 
@@ -315,19 +333,20 @@ module PixelFormat = struct
     | n -> log2 (n / 2) + 1
 
   let unmarshal (s: Channel.fd) =
-    really_read s 16 >>= fun buf ->
-    return { bpp = bpp_of_int (int_of_char (Cstruct.get_char buf 0));
-      depth = int_of_char (Cstruct.get_char buf 1);
-      big_endian = Cstruct.get_char buf 2 <> '\000';
-      true_colour = Cstruct.get_char buf 3 <> '\000';
-      red_max_n = log2 (UInt16.unmarshal (Cstruct.sub buf 4 2) + 1);
-      green_max_n = log2 (UInt16.unmarshal (Cstruct.sub buf 6 2) + 1);
-      blue_max_n = log2 (UInt16.unmarshal (Cstruct.sub buf 8 2) + 1);
-      red_shift = int_of_char (Cstruct.get_char buf 10);
-      green_shift = int_of_char (Cstruct.get_char buf 11);
-      blue_shift = int_of_char (Cstruct.get_char buf 12);
-      (* ignoring padding *)
-    }
+    really_read s sizeof_hdr >>= fun buf ->
+    let bpp = bpp_of_int (get_hdr_bpp buf) in
+    let depth = get_hdr_depth buf in
+    let big_endian = get_hdr_big_endian buf <> 0 in
+    let true_colour = get_hdr_true_colour buf <> 0 in
+    let red_max_n = log2 (get_hdr_red_max buf + 1) in
+    let green_max_n = log2 (get_hdr_green_max buf + 1) in
+    let blue_max_n = log2 (get_hdr_blue_max buf + 1) in
+    let red_shift = get_hdr_red_shift buf in
+    let green_shift = get_hdr_green_shift buf in
+    let blue_shift = get_hdr_blue_shift buf in
+    return { bpp; depth; big_endian; true_colour;
+      red_max_n; green_max_n; blue_max_n;
+      red_shift; green_shift; blue_shift }
 end
 
 module Pixel = struct
