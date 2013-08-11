@@ -664,10 +664,18 @@ end
 module KeyEvent = struct
   type t = { down: bool; key: UInt32.t }
 
+  cstruct hdr {
+    uint8_t down;
+    uint16_t padding;
+    uint32_t key
+  } as big_endian
+
   let unmarshal (s: Channel.fd) =
-    really_read s 7 >>= fun buf ->
-    return { down = Cstruct.get_uint8 buf 0 <> 0;
-      key = UInt32.unmarshal (Cstruct.sub buf 3 4) }
+    really_read s sizeof_hdr >>= fun buf ->
+    let down = get_hdr_down buf <> 0 in
+    let key = get_hdr_key buf in
+    return { down; key }
+
   let prettyprint (x: t) = 
     Printf.sprintf "KeyEvent { down = %b; key = %s }"
       x.down (Int32.to_string x.key)
