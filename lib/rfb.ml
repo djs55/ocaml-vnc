@@ -503,14 +503,23 @@ module FramebufferUpdateRequest = struct
 	     x: int; y: int;
 	     width: int; height: int }
 
+  cstruct hdr {
+    uint8_t incremental;
+    uint16_t x;
+    uint16_t y;
+    uint16_t width;
+    uint16_t height
+  } as big_endian
+
   let unmarshal (s: Channel.fd) = 
-    really_read s 9 >>= fun buf ->
-    return { incremental = Cstruct.get_uint8 buf 0 <> 0;
-      x = UInt16.unmarshal (Cstruct.sub buf 1 2);
-      y = UInt16.unmarshal (Cstruct.sub buf 3 2);
-      width = UInt16.unmarshal (Cstruct.sub buf 5 2);
-      height = UInt16.unmarshal (Cstruct.sub buf 7 2);
-    }
+    really_read s sizeof_hdr >>= fun buf ->
+    let incremental = get_hdr_incremental buf <> 0 in
+    let x = get_hdr_x buf in
+    let y = get_hdr_y buf in
+    let width = get_hdr_width buf in
+    let height = get_hdr_height buf in
+    return { incremental; x; y; width; height }
+
   let prettyprint (x: t) = 
     Printf.sprintf "FrameBufferUpdateRequest (incr=%b x=%d y=%d width=%d height=%d)" x.incremental x.x x.y x.width x.height
 end
