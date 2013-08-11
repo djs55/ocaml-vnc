@@ -208,21 +208,21 @@ module PixelFormat = struct
 	     depth: int;
 	     big_endian: bool;
 	     true_colour: bool;
-	     red_max: int;
-	     green_max: int;
-	     blue_max: int;
+	     red_max_n: int;   (* red_max = 2 ** red_max_n - 1 *)
+	     green_max_n: int; (* green_max = 2 ** green_max_n - 1 *)
+	     blue_max_n: int;  (* blue_max = 2 ** blue_max_n - 1 *)
 	     red_shift: int;
 	     green_shift: int;
 	     blue_shift: int }
 
   let to_string t =
-    Printf.sprintf "{ bpp=%d; depth=%d; big_endian=%b; true_colour=%b; red_max=%d; green_max=%d; blue_max=%d; red_shift=%d; green_shift=%d; blue_shift=%d }"
-    t.bpp t.depth t.big_endian t.true_colour t.red_max t.green_max t.blue_max t.red_shift t.green_shift t.blue_shift
+    Printf.sprintf "{ bpp=%d; depth=%d; big_endian=%b; true_colour=%b; red_max_n=%d; green_max_n=%d; blue_max_n=%d; red_shift=%d; green_shift=%d; blue_shift=%d }"
+    t.bpp t.depth t.big_endian t.true_colour t.red_max_n t.green_max_n t.blue_max_n t.red_shift t.green_shift t.blue_shift
 
   let true_colour_default big_endian = {
     bpp = 32; depth = 24; big_endian = big_endian;
     true_colour = true;
-    red_max = 0xff; green_max = 0xff; blue_max = 0xff;
+    red_max_n = 8; green_max_n = 8; blue_max_n = 8;
     red_shift = 16; green_shift = 8; blue_shift = 0;
   }
   let marshal (x: t) = 
@@ -230,24 +230,32 @@ module PixelFormat = struct
     let depth = String.make 1 (char_of_int x.depth) in
     let big_endian = if x.big_endian then "x" else "\000" in
     let true_colour = if x.true_colour then "x" else "\000" in
-    let red_max = UInt16.marshal x.red_max in
-    let green_max = UInt16.marshal x.green_max in
-    let blue_max = UInt16.marshal x.blue_max in
+    let red_max = UInt16.marshal (1 lsl x.red_max_n - 1) in
+    let green_max = UInt16.marshal (1 lsl x.green_max_n - 1) in
+    let blue_max = UInt16.marshal (1 lsl x.blue_max_n - 1) in
     let red_shift = String.make 1 (char_of_int x.red_shift) in
     let green_shift = String.make 1 (char_of_int x.green_shift) in
     let blue_shift = String.make 1 (char_of_int x.blue_shift) in
     bpp ^ depth ^ big_endian ^ true_colour ^ 
       red_max ^ green_max ^ blue_max ^ red_shift ^ green_shift ^ blue_shift ^
       "   " (* padding *)
+
+  exception Illegal_colour_max
+
+  let rec log2 = function
+    | 0 -> raise Illegal_colour_max
+    | 1 -> 0
+    | n -> log2 (n / 2) + 1
+
   let unmarshal (s: Channel.fd) =
     really_read s 16 >>= fun buf ->
     return { bpp = int_of_char (Cstruct.get_char buf 0);
       depth = int_of_char (Cstruct.get_char buf 1);
       big_endian = Cstruct.get_char buf 2 <> '\000';
       true_colour = Cstruct.get_char buf 3 <> '\000';
-      red_max = UInt16.unmarshal (Cstruct.sub buf 4 2);
-      green_max = UInt16.unmarshal (Cstruct.sub buf 6 2);
-      blue_max = UInt16.unmarshal (Cstruct.sub buf 8 2);
+      red_max_n = log2 (UInt16.unmarshal (Cstruct.sub buf 4 2) + 1);
+      green_max_n = log2 (UInt16.unmarshal (Cstruct.sub buf 6 2) + 1);
+      blue_max_n = log2 (UInt16.unmarshal (Cstruct.sub buf 8 2) + 1);
       red_shift = int_of_char (Cstruct.get_char buf 10);
       green_shift = int_of_char (Cstruct.get_char buf 11);
       blue_shift = int_of_char (Cstruct.get_char buf 12);
