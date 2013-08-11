@@ -128,18 +128,29 @@ module ProtocolVersion = struct
 
   exception Unmarshal_failure
 
-  let startswith prefix x =
-    let prefix' = String.length prefix and x' = String.length x in
-    x' >= prefix' && (String.sub x 0 prefix' = prefix)
+  cstruct hdr {
+    uint8_t rfb[4];
+    uint8_t major[3];
+    uint8_t dot;
+    uint8_t minor[3];
+    uint8_t newline
+  } as little_endian
 
-  let marshal (x: t) = Printf.sprintf "RFB %03x.%03x\n" x.major x.minor
+  let marshal (x: t) =
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout sizeof_hdr)) in
+    set_hdr_rfb "RFB " 0 buf;
+    set_hdr_major (Printf.sprintf "%03d" x.major) 0 buf;
+    set_hdr_dot buf (int_of_char '.');
+    set_hdr_minor (Printf.sprintf "%03d" x.minor) 0 buf;
+    set_hdr_newline buf (int_of_char '\n');
+    Cstruct.to_string buf
+
   let unmarshal (s: Channel.fd) = 
-    really_read s 12 >>= fun x ->
-    let rfb = Cstruct.(to_string (sub x 0 4)) in
-    if rfb <> "RFB "
+    really_read s sizeof_hdr >>= fun x ->
+    if copy_hdr_rfb x <> "RFB "
     then raise Unmarshal_failure;
-    let major = int_of_string (Cstruct.(to_string (sub x 4 3))) in
-    let minor = int_of_string (Cstruct.(to_string (sub x 8 3))) in
+    let major = int_of_string (copy_hdr_major x) in
+    let minor = int_of_string (copy_hdr_minor x) in
     return { major = major; minor = minor }
 
   let prettyprint (x: t) = 
