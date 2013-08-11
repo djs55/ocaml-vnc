@@ -136,13 +136,16 @@ module ProtocolVersion = struct
     uint8_t newline
   } as big_endian
 
-  let marshal (x: t) =
-    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout sizeof_hdr)) in
+  let marshal_at (x: t) buf =
     set_hdr_rfb "RFB " 0 buf;
     set_hdr_major (Printf.sprintf "%03d" x.major) 0 buf;
     set_hdr_dot buf (int_of_char '.');
     set_hdr_minor (Printf.sprintf "%03d" x.minor) 0 buf;
-    set_hdr_newline buf (int_of_char '\n');
+    set_hdr_newline buf (int_of_char '\n')
+
+  let marshal (x: t) =
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout sizeof_hdr)) in
+    marshal_at x buf;
     Cstruct.to_string buf
 
   let unmarshal (s: Channel.fd) = 
@@ -172,8 +175,7 @@ module Error = struct
     Cstruct.blit_from_string x 0 buf sizeof_hdr x'
 
   let marshal (x: t) =
-    let x' = String.length x in
-    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof_hdr + x'))) in
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
     marshal_at x buf;
     Cstruct.to_string buf
 
@@ -203,9 +205,7 @@ module SecurityType = struct
     | Failed x -> sizeof_hdr + (Error.sizeof x)
     | NoSecurity | VNCAuth -> sizeof_hdr
 
-  let marshal (x: t) =
-    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
-    begin match x with
+  let marshal_at (x: t) buf = match x with
     | Failed x ->
       set_hdr_ty buf (code_to_int FAILED);
       Error.marshal_at x (Cstruct.shift buf sizeof_hdr)
@@ -213,7 +213,10 @@ module SecurityType = struct
       set_hdr_ty buf (code_to_int NOSECURITY)
     | VNCAuth ->
       set_hdr_ty buf (code_to_int VNCAUTH)
-    end;
+
+  let marshal (x: t) =
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
+    marshal_at x buf;
     Cstruct.to_string buf
 
   let unmarshal (s: Channel.fd) =
