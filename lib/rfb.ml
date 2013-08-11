@@ -629,13 +629,35 @@ end
 module SetColourMapEntries = struct
   type t = { first_colour: int; 
 	     map: (int * int * int) list }
+
+  cstruct hdr {
+    uint8_t padding;
+    uint16_t first_colour;
+    uint16_t nr_colours
+  } as big_endian
+
+  cstruct colour {
+    uint16_t r;
+    uint16_t g;
+    uint16_t b
+  } as big_endian
+
+  let sizeof x = sizeof_hdr + (List.length x.map * sizeof_colour)
+
+  let marshal_at (x: t) buf =
+    set_hdr_first_colour buf x.first_colour;
+    set_hdr_nr_colours buf (List.length x.map);
+    List.fold_left (fun buf (r, g, b) ->
+      set_colour_r buf r;
+      set_colour_g buf g;
+      set_colour_b buf b;
+      Cstruct.shift buf sizeof_colour
+    ) buf x.map
+
   let marshal (x: t) = 
-    let first_colour = UInt16.marshal x.first_colour in
-    let length = UInt16.marshal (List.length x.map) in
-    let colour (r, g, b) = 
-      UInt16.marshal r ^ (UInt16.marshal g) ^ (UInt16.marshal b) in
-    "\001\000" ^ first_colour ^ length ^ 
-      (String.concat "" (List.map colour x.map))
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
+    marshal_at x buf;
+    Cstruct.to_string buf
 end
 
 module KeyEvent = struct
