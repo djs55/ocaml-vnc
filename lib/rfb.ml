@@ -387,12 +387,26 @@ module ServerInit = struct
 	     name: string;
 	     pixelformat: PixelFormat.t }
 
-  let marshal (x: t) = 
-    let width = UInt16.marshal x.width in
-    let height = UInt16.marshal x.height in
-    let pixel = PixelFormat.marshal x.pixelformat in
-    let name_length = UInt32.marshal (Int32.of_int (String.length x.name)) in
-    width ^ height ^ pixel ^ name_length ^ x.name
+  cstruct hdr {
+    uint16_t width;
+    uint16_t height;
+    uint8_t pixelformat[16];
+    uint32_t name_length
+  } as big_endian
+
+  let sizeof x = sizeof_hdr + (String.length x.name)
+
+  let marshal_at (x: t) buf =
+    set_hdr_width buf x.width;
+    set_hdr_height buf x.height;
+    PixelFormat.marshal_at x.pixelformat (Cstruct.shift buf 4);
+    set_hdr_name_length buf (Int32.of_int (String.length x.name));
+    Cstruct.blit_from_string x.name 0 buf sizeof_hdr (String.length x.name)
+
+  let marshal (x: t) =
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
+    marshal_at x buf;
+    Cstruct.to_string buf
 end
 
 module SetPixelFormat = struct
