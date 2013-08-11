@@ -647,12 +647,13 @@ module SetColourMapEntries = struct
   let marshal_at (x: t) buf =
     set_hdr_first_colour buf x.first_colour;
     set_hdr_nr_colours buf (List.length x.map);
-    List.fold_left (fun buf (r, g, b) ->
+    let (_: Cstruct.t) = List.fold_left (fun buf (r, g, b) ->
       set_colour_r buf r;
       set_colour_g buf g;
       set_colour_b buf b;
       Cstruct.shift buf sizeof_colour
-    ) buf x.map
+    ) buf x.map in
+    ()
 
   let marshal (x: t) = 
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
