@@ -15,17 +15,17 @@ let debug = ref true
 
 module Coord = struct
   type t = int * int
-  let compare ((x1,y1): t) ((x2,y2): t) =
-    if x1 < x2 then -1
-    else if x1 > x2 then 1
-    else if y1 < y2 then -1
-    else if y1 > y2 then 1
+  let compare ((row1,col1): t) ((row2,col2): t) =
+    if row1 < row2 then -1
+    else if row1 > row2 then 1
+    else if col1 < col2 then -1
+    else if col1 > col2 then 1
     else 0
+
+  let to_string (row, col) = Printf.sprintf "{ row=%d; col=%d }" row col
 end
 
 module CoordMap = Map.Make(Coord)
-
-module CoordSet = Set.Make(Coord)
 
 module Console = struct
   type t = {
@@ -154,11 +154,11 @@ module Delta = struct
   let to_string = function
     | Scroll x -> Printf.sprintf "Scroll %d" x
     | Update (coord, cell) ->
-      Printf.sprintf "Update %d,%d %s"
-        (fst coord) (snd coord) (string_of_cell cell)
+      Printf.sprintf "Update %s %s"
+        (Coord.to_string coord) (string_of_cell cell)
     | Copy (coord, from) ->
-      Printf.sprintf "Copy   %d,%d from %d,%d"
-        (fst coord) (snd coord) (fst from) (snd from)
+      Printf.sprintf "Copy   %s from %s"
+        (Coord.to_string coord) (Coord.to_string from)
 
   let rec apply screen d =
     match d with

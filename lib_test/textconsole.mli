@@ -18,14 +18,12 @@ module Coord : sig
   type t = int * int
 
   val compare: t -> t -> int
+
+  val to_string: t -> string
 end
 
 module CoordMap : sig
   include module type of Map.Make(Coord)
-end
-
-module CoordSet : sig
-  include module type of Set.Make(Coord)
 end
 
 module Console : sig
