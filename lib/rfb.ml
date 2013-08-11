@@ -160,14 +160,20 @@ end
 module Error = struct
   type t = string
 
-  cstruct c {
+  cstruct hdr {
     uint32_t length
   } as little_endian
 
-  let marshal (x: t) = UInt32.marshal (Int32.of_int (String.length x)) ^ x
+  let marshal (x: t) =
+    let x' = String.length x in
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof_hdr + x'))) in
+    set_hdr_length buf (Int32.of_int x');
+    Cstruct.blit_from_string x 0 buf sizeof_hdr x';
+    Cstruct.to_string buf
+
   let unmarshal (s: Channel.fd) =
-    really_read s 4 >>= fun x ->
-    let len = get_c_length x in
+    really_read s sizeof_hdr >>= fun x ->
+    let len = get_hdr_length x in
     really_read s (Int32.to_int len)
 end
 
