@@ -204,7 +204,21 @@ module ClientInit = struct
 end
 
 module PixelFormat = struct
-  type t = { bpp: int;
+  type bpp = BPP_8 | BPP_16 | BPP_32
+
+  let int_of_bpp = function BPP_8 -> 8 | BPP_16 -> 16 | BPP_32 -> 32
+
+  exception Illegal_bits_per_pixel of int
+
+  let bpp_of_int = function
+    | 8 -> BPP_8
+    | 16 -> BPP_16
+    | 32 -> BPP_32
+    | x -> raise (Illegal_bits_per_pixel x)
+
+  let string_of_bpp x = string_of_int (int_of_bpp x)
+
+  type t = { bpp: bpp;
 	     depth: int;
 	     big_endian: bool;
 	     true_colour: bool;
@@ -216,17 +230,20 @@ module PixelFormat = struct
 	     blue_shift: int }
 
   let to_string t =
-    Printf.sprintf "{ bpp=%d; depth=%d; big_endian=%b; true_colour=%b; red_max_n=%d; green_max_n=%d; blue_max_n=%d; red_shift=%d; green_shift=%d; blue_shift=%d }"
-    t.bpp t.depth t.big_endian t.true_colour t.red_max_n t.green_max_n t.blue_max_n t.red_shift t.green_shift t.blue_shift
+    Printf.sprintf "{ bpp=%s; depth=%d; big_endian=%b; true_colour=%b; red_max_n=%d; green_max_n=%d; blue_max_n=%d; red_shift=%d; green_shift=%d; blue_shift=%d }"
+    (string_of_bpp t.bpp) t.depth t.big_endian t.true_colour t.red_max_n t.green_max_n t.blue_max_n t.red_shift t.green_shift t.blue_shift
 
   let true_colour_default big_endian = {
-    bpp = 32; depth = 24; big_endian = big_endian;
+    bpp = BPP_32; depth = 24; big_endian = big_endian;
     true_colour = true;
     red_max_n = 8; green_max_n = 8; blue_max_n = 8;
     red_shift = 16; green_shift = 8; blue_shift = 0;
   }
+
+  let bytes_per_pixel t = int_of_bpp t.bpp / 8
+
   let marshal (x: t) = 
-    let bpp = String.make 1 (char_of_int x.bpp) in
+    let bpp = String.make 1 (char_of_int (int_of_bpp x.bpp)) in
     let depth = String.make 1 (char_of_int x.depth) in
     let big_endian = if x.big_endian then "x" else "\000" in
     let true_colour = if x.true_colour then "x" else "\000" in
@@ -249,7 +266,7 @@ module PixelFormat = struct
 
   let unmarshal (s: Channel.fd) =
     really_read s 16 >>= fun buf ->
-    return { bpp = int_of_char (Cstruct.get_char buf 0);
+    return { bpp = bpp_of_int (int_of_char (Cstruct.get_char buf 0));
       depth = int_of_char (Cstruct.get_char buf 1);
       big_endian = Cstruct.get_char buf 2 <> '\000';
       true_colour = Cstruct.get_char buf 3 <> '\000';
@@ -261,6 +278,39 @@ module PixelFormat = struct
       blue_shift = int_of_char (Cstruct.get_char buf 12);
       (* ignoring padding *)
     }
+end
+
+module Pixel = struct
+  open PixelFormat
+
+  let encode pf r g b =
+    if pf.true_colour then begin
+      let r' = r lsr (8 - pf.red_max_n) in
+      let g' = g lsr (8 - pf.green_max_n) in
+      let b' = b lsr (8 - pf.blue_max_n) in
+      (r' lsl pf.red_shift) lor (g' lsl pf.green_shift) lor (b' lsl pf.blue_shift)
+    end else failwith "implement colour maps"
+
+  let write pf buf ofs pixel =
+    match pf.PixelFormat.bpp, pf.PixelFormat.big_endian with
+    | BPP_8, _ ->
+      buf.[ofs] <- char_of_int pixel
+    | BPP_16, true ->
+      buf.[ofs + 0] <- char_of_int (pixel lsr 8);
+      buf.[ofs + 1] <- char_of_int (pixel land 0xff)
+    | BPP_16, false ->
+      buf.[ofs + 0] <- char_of_int (pixel land 0xff);
+      buf.[ofs + 1] <- char_of_int (pixel lsr 8)
+    | BPP_32, true ->
+      buf.[ofs + 0] <- char_of_int (pixel lsr 16);
+      buf.[ofs + 1] <- char_of_int ((pixel lsr 8) land 0xff);
+      buf.[ofs + 2] <- char_of_int (pixel land 0xff);
+      buf.[ofs + 3] <- char_of_int 0
+    | BPP_32, false ->
+      buf.[ofs + 0] <- char_of_int (pixel land 0xff);
+      buf.[ofs + 1] <- char_of_int ((pixel lsr 8) land 0xff);
+      buf.[ofs + 2] <- char_of_int (pixel lsr 16);
+      buf.[ofs + 3] <- char_of_int 0
 end
 
 module ServerInit = struct
@@ -288,8 +338,7 @@ module SetPixelFormat = struct
     PixelFormat.unmarshal s
 
   let prettyprint (x: t) = 
-    Printf.sprintf "SetPixelFormat (bpp=%d depth=%d)" 
-      x.PixelFormat.bpp x.PixelFormat.depth
+    Printf.sprintf "SetPixelFormat %s" (PixelFormat.to_string x) 
 end
 
 module Encoding = struct

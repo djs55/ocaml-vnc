@@ -39,7 +39,7 @@ let width_of_font font =
 let write_raw_char pf font highlight c =
   let font_width = width_of_font font in
   let font_height = height_of_font font in
-  let bytes_per_pixel = pf.PixelFormat.bpp / 8 in
+  let bytes_per_pixel = PixelFormat.bytes_per_pixel pf in
   let buffer = String.create (font_width * font_height * bytes_per_pixel) in
   let e = Pcf.Encoding.of_int c in
   let pixels = match Pcf.Glyph.get_bitmap font e with
@@ -53,18 +53,18 @@ let write_raw_char pf font highlight c =
       Array.iteri
         (fun col pixel ->
           let ofs = (row * font_width + col) * bytes_per_pixel in
-          let c = if (pixel && not highlight)||(not pixel && highlight) then 0xffffff else 0x0 in
-          buffer.[ofs + 0] <- char_of_int (c lsr 16);
-          buffer.[ofs + 1] <- char_of_int ((c lsr 8) land 0xff);
-          buffer.[ofs + 2] <- char_of_int (c land 0xff);
-          if bytes_per_pixel = 32
-          then buffer.[ofs + 3] <- char_of_int 0
+          let r, g, b =
+            if (pixel && not highlight) || (not pixel && highlight)
+            then 0xff, 0xff, 0xff
+            else 0x0,  0x0,  0x0 in
+          let encoded = Pixel.encode pf r g b in
+          Pixel.write pf buffer ofs encoded;
         ) row_data
     ) pixels;
   FramebufferUpdate.Encoding.Raw { FramebufferUpdate.Raw.buffer = buffer }
 
 let make_update pf drawing_operations font x y w h =
-  let bytes_per_pixel = pf.PixelFormat.bpp / 8 in
+  let bytes_per_pixel = PixelFormat.bytes_per_pixel pf in
   let font_width = width_of_font font in
   let font_height = height_of_font font in
 
@@ -91,10 +91,11 @@ let make_update pf drawing_operations font x y w h =
 
   let write { char = char; highlight = highlight } = match char with
    | None ->
-      Encoding.RRE {
-        RRE.background = String.make bytes_per_pixel (if highlight then '\255' else '\000');
-        rectangles = []
-     }
+      let r, g, b = if highlight then 0xff, 0xff, 0xff else 0x0, 0x0, 0x0 in
+      let encoded = Pixel.encode pf r g b in
+      let background = String.create bytes_per_pixel in
+      Pixel.write pf background 0 encoded;
+      Encoding.RRE { RRE.background; rectangles = [] }
    | Some c ->
      write_raw_char pf font highlight c in
 

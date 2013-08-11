@@ -44,25 +44,21 @@ let wait_update last_update =
   Mutex.unlock update_counter_m;
   this_update
 
-let make_update bpp =
+let make_update pf =
   let d = get_display_buffer () in
   (* Update the whole thing *)
-  let bytes_per_pixel = bpp / 8 in
+  let bytes_per_pixel = PixelFormat.bytes_per_pixel pf in
   let buffer = String.create (w * h * bytes_per_pixel) in
   let bytes_per_line = w * bytes_per_pixel in
   for y = 0 to h - 1 do
     let y' = y * bytes_per_line in
     for x = 0 to w - 1 do
       let x' = x * bytes_per_pixel in
-      match bpp with
-      | 32 | 24 ->
-        buffer.[y' + x' + 0] <- char_of_int (d.(y * w + x) lsr 16);
-        buffer.[y' + x' + 1] <- char_of_int ((d.(y * w + x) lsr 8) land 0xff);
-        buffer.[y' + x' + 2] <- char_of_int (d.(y * w + x) land 0xff);
-        if bytes_per_pixel = 32
-        then buffer.[y' + x' + 3] <- char_of_int 0
-      | _ ->
-        failwith "unimplemented"
+      let r = d.(y * w + x) lsr 16 in
+      let g = (d.(y * w + x) lsr 8) land 0xff in
+      let b = d.(y * w + x) land 0xff in
+      let encoded = Pixel.encode pf r g b in
+      Pixel.write pf buffer (y' + x') encoded
     done
   done;
   let raw = { FramebufferUpdate.Raw.buffer = buffer } in
@@ -141,24 +137,23 @@ let animate fps f =
   done
 
 let server (s: Unix.file_descr) =
-  let pf = PixelFormat.true_colour_default Sys.big_endian in
-  Server.handshake "rotate" pf w h s;
+  let pf = ref (PixelFormat.true_colour_default Sys.big_endian) in
+  Server.handshake "rotate" !pf w h s;
 
-  let bpp = ref 32 in
   let last_update_seen = ref !update_counter in
   while true do
     let req = Request.unmarshal s in
     (* print_endline ("<- " ^ (Request.prettyprint req)); *)
     match req with
-    | Request.SetPixelFormat pf ->
-	bpp := pf.PixelFormat.bpp;
+    | Request.SetPixelFormat pf' ->
+	pf := pf'
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = true } ->
       last_update_seen := wait_update !last_update_seen;
-      let update = make_update !bpp in
+      let update = make_update !pf in
       (* print_endline ("-> " ^ (FramebufferUpdate.prettyprint update)); *)
       Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ])
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false } ->
-      let update = make_update !bpp in
+      let update = make_update !pf in
       print_endline ("-> " ^ (FramebufferUpdate.prettyprint update));
       Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ]);
     | _ ->

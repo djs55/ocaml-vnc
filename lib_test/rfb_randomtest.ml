@@ -20,17 +20,16 @@ module Server = Rfb.Make(Rfb_unix)
 open Server
 
 let server (s: Unix.file_descr) =
-  let pf = PixelFormat.true_colour_default Sys.big_endian in
-  Server.handshake "random" pf w h s;
+  let pf = ref (PixelFormat.true_colour_default Sys.big_endian) in
+  Server.handshake "random" !pf w h s;
 
-  let bpp = ref 32 in
   let update_thread = ref None in
   while true do
     let req = Request.unmarshal s in
     print_endline ("<- " ^ (Request.prettyprint req));
     match req with
-    | Request.SetPixelFormat pf ->
-	bpp := pf.PixelFormat.bpp;
+    | Request.SetPixelFormat pf' ->
+	pf := pf'
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = true } ->
       (* send a copyrect *)
       let w' = Random.int (w - 1) + 1 and h' = Random.int (h - 1) + 1 in
@@ -43,7 +42,8 @@ let server (s: Unix.file_descr) =
       Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ])
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false } ->
       (* Update the whole thing *)
-      let buffer = String.create (w * h * !bpp / 8) in
+      let bytes_per_pixel = PixelFormat.bytes_per_pixel !pf in
+      let buffer = String.create (w * h * bytes_per_pixel) in
       for i = 0 to String.length buffer - 1 do
         buffer.[i] <- char_of_int (Random.int 255)
       done;
