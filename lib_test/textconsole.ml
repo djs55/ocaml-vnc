@@ -195,7 +195,7 @@ module Delta = struct
     let draw coord map =
       if CoordMap.mem coord b.Screen.cells
       then CoordMap.add coord (CoordMap.find coord b.Screen.cells) map
-      else map in
+      else CoordMap.add coord { char = None; highlight = false } map in
 
     let cells = CoordMap.empty in
     let cells =
