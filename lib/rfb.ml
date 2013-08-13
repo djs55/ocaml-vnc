@@ -25,7 +25,7 @@ module type CHANNEL = sig
   type fd
 
   val really_read: fd -> int -> Cstruct.t t
-  val really_write: fd -> string -> unit t
+  val really_write: fd -> Cstruct.t -> unit t
 end
 
 module Make = functor(Channel: CHANNEL) -> struct
@@ -44,25 +44,30 @@ module ProtocolVersion = struct
     uint8_t newline
   } as big_endian
 
+  let sizeof = sizeof_hdr
+
   let marshal_at (x: t) buf =
     set_hdr_rfb "RFB " 0 buf;
     set_hdr_major (Printf.sprintf "%03d" x.major) 0 buf;
     set_hdr_dot buf (int_of_char '.');
     set_hdr_minor (Printf.sprintf "%03d" x.minor) 0 buf;
-    set_hdr_newline buf (int_of_char '\n')
+    set_hdr_newline buf (int_of_char '\n');
+    Cstruct.sub buf 0 sizeof
 
   let marshal (x: t) =
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout sizeof_hdr)) in
-    marshal_at x buf;
-    Cstruct.to_string buf
+    Cstruct.to_string (marshal_at x buf)
 
-  let unmarshal (s: Channel.fd) = 
-    really_read s sizeof_hdr >>= fun x ->
+  let unmarshal_at (s: Channel.fd) x =
     if copy_hdr_rfb x <> "RFB "
     then raise Unmarshal_failure;
     let major = int_of_string (copy_hdr_major x) in
     let minor = int_of_string (copy_hdr_minor x) in
     return { major = major; minor = minor }
+
+  let unmarshal (s: Channel.fd) = 
+    really_read s sizeof_hdr >>= fun x ->
+    unmarshal_at s x
 
   let prettyprint (x: t) = 
     Printf.sprintf "ProtocolVersion major = %d minor = %d" x.major x.minor
@@ -113,7 +118,8 @@ module SecurityType = struct
     | Failed x -> sizeof_hdr + (Error.sizeof x)
     | NoSecurity | VNCAuth -> sizeof_hdr
 
-  let marshal_at (x: t) buf = match x with
+  let marshal_at (x: t) buf =
+    begin match x with
     | Failed x ->
       set_hdr_ty buf (code_to_int FAILED);
       Error.marshal_at x (Cstruct.shift buf sizeof_hdr)
@@ -121,11 +127,12 @@ module SecurityType = struct
       set_hdr_ty buf (code_to_int NOSECURITY)
     | VNCAuth ->
       set_hdr_ty buf (code_to_int VNCAUTH)
+    end;
+    Cstruct.sub buf 0 (sizeof x)
 
   let marshal (x: t) =
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
-    marshal_at x buf;
-    Cstruct.to_string buf
+    Cstruct.to_string (marshal_at x buf)
 
   let unmarshal (s: Channel.fd) =
     really_read s sizeof_hdr >>= fun x -> 
@@ -145,20 +152,23 @@ module ClientInit = struct
     uint8_t shared
   } as big_endian
 
-  let sizeof _ = sizeof_hdr
+  let sizeof = sizeof_hdr
 
   let marshal_at (x: t) buf =
     set_hdr_shared buf (if x then 1 else 0)
 
   let marshal (x: t) =
-    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout sizeof)) in
     marshal_at x buf;
     Cstruct.to_string buf
 
-  let unmarshal (s: Channel.fd) =
-    really_read s sizeof_hdr >>= fun x ->
+  let unmarshal_at (s: Channel.fd) x =
     let shared = get_hdr_shared x in
     return (shared <> 0)
+
+  let unmarshal (s: Channel.fd) =
+    really_read s sizeof_hdr >>= fun x ->
+    unmarshal_at s x
 end
 
 module PixelFormat = struct
@@ -309,12 +319,12 @@ module ServerInit = struct
     set_hdr_height buf x.height;
     PixelFormat.marshal_at x.pixelformat (Cstruct.shift buf 4);
     set_hdr_name_length buf (Int32.of_int (String.length x.name));
-    Cstruct.blit_from_string x.name 0 buf sizeof_hdr (String.length x.name)
+    Cstruct.blit_from_string x.name 0 buf sizeof_hdr (String.length x.name);
+    Cstruct.sub buf 0 (sizeof x)
 
   let marshal (x: t) =
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
-    marshal_at x buf;
-    Cstruct.to_string buf
+    Cstruct.to_string (marshal_at x buf)
 end
 
 module SetPixelFormat = struct
@@ -515,15 +525,19 @@ module FramebufferUpdate = struct
     let marshal_at (x: t) buf = match x with
       | Raw x ->
         set_hdr_ty buf 0l;
-        Raw.marshal_at x (Cstruct.shift buf sizeof_hdr)
+        Raw.marshal_at x (Cstruct.shift buf sizeof_hdr);
+        Cstruct.sub buf 0 (sizeof_hdr + (Raw.sizeof x))
       | CopyRect x ->
         set_hdr_ty buf 1l;
-        CopyRect.marshal_at x (Cstruct.shift buf sizeof_hdr)
+        CopyRect.marshal_at x (Cstruct.shift buf sizeof_hdr);
+        Cstruct.sub buf 0 (sizeof_hdr + (CopyRect.sizeof x))
       | RRE x ->
         set_hdr_ty buf 2l;
-        RRE.marshal_at x (Cstruct.shift buf sizeof_hdr)
+        RRE.marshal_at x (Cstruct.shift buf sizeof_hdr);
+        Cstruct.sub buf 0 (sizeof_hdr + (RRE.sizeof x))
       | DesktopSize ->
-        set_hdr_ty buf (-223l)
+        set_hdr_ty buf (-223l);
+        Cstruct.sub buf 0 sizeof_hdr
 
     let prettyprint = function
       | Raw _ -> "Raw"
@@ -561,15 +575,14 @@ module FramebufferUpdate = struct
     set_hdr_ty buf 0;
     set_hdr_nr_rectangles buf (List.length xs);
     let (_: Cstruct.t) = List.fold_left (fun buf x ->
-      marshal_rectangle_at x buf;
+      let (_: Cstruct.t) = marshal_rectangle_at x buf in
       Cstruct.shift buf (sizeof_rectangle + (Encoding.sizeof x.encoding))
     ) (Cstruct.shift buf sizeof_hdr) xs in
-    ()
+    Cstruct.sub buf 0 (sizeof xs)
 
   let marshal (xs: t list) = 
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof xs))) in
-    marshal_at xs buf;
-    Cstruct.to_string buf
+    Cstruct.to_string (marshal_at xs buf)
 
   let prettyprint (t: t) =
     Printf.sprintf "Rectangle {x=%d y=%d w=%d h=%d encoding=%s}"
@@ -715,16 +728,15 @@ end
 let white = (255, 255, 255)
 let black = (0, 0, 0)
 
-let handshake name pixelformat w h (s: Channel.fd) =
+let handshake name pixelformat w h buf (s: Channel.fd) =
   let ver = { ProtocolVersion.major = 3; minor = 3 } in
-  really_write s (ProtocolVersion.marshal ver) >>= fun () ->
-  ProtocolVersion.unmarshal s >>= fun ver' ->
-  print_endline (ProtocolVersion.prettyprint ver');
-  really_write s (SecurityType.marshal SecurityType.NoSecurity) >>= fun () ->
-  ClientInit.unmarshal s >>= fun ci ->
+  really_write s (ProtocolVersion.marshal_at ver buf) >>= fun () ->
+  ProtocolVersion.unmarshal_at s buf >>= fun ver' ->
+  really_write s (SecurityType.marshal_at SecurityType.NoSecurity buf) >>= fun () ->
+  ClientInit.unmarshal_at s buf >>= fun ci ->
   if ci then print_endline "Client requests a shared display"
   else print_endline "Client requests a non-shared display";
-  let si = { ServerInit.name; pixelformat;
-	     width = w; height = h } in
-  really_write s (ServerInit.marshal si)
+  let si = { ServerInit.name; pixelformat; width = w; height = h } in
+  really_write s (ServerInit.marshal_at si buf)
+
 end

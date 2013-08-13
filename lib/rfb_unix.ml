@@ -36,6 +36,7 @@ let really_write fd buf =
     (String.length buf) (String.concat " " (List.map (fun x -> Printf.sprintf "%02x" (int_of_char x)) (String.explode buf))); 
 (*Unix.sleep 2; *)
 *)
-  let len = Unix.write fd buf 0 (String.length buf) in
-  if len <> String.length buf then raise End_of_file
+  let buf' = Cstruct.to_string buf in
+  let len = Unix.write fd buf' 0 (String.length buf') in
+  if len <> String.length buf' then raise End_of_file
 

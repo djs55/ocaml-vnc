@@ -141,7 +141,9 @@ let wait_for_update c =
 
 let server (s: Lwt_unix.file_descr) window font = 
   let pf = ref (PixelFormat.true_colour_default Sys.big_endian) in
-  lwt () = Server.handshake "console" !pf w h s in
+  let buf = ref (Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout 4096))) in
+
+  lwt () = Server.handshake "console" !pf w h !buf s in
 
   let client_remembers = ref (Console.make 0) in
   let m = Lwt_mutex.create () in
@@ -170,19 +172,22 @@ let server (s: Lwt_unix.file_descr) window font =
                 print_endline (FramebufferUpdate.prettyprint x);
               ) !updates;
           end;
-          lwt () = Rfb_lwt.really_write s (FramebufferUpdate.marshal !updates) in
+          lwt () = Rfb_lwt.really_write s (FramebufferUpdate.marshal_at !updates !buf) in
           return ()
         )
      in
 
   while_lwt true do
-    lwt req = Request.unmarshal s in
+    lwt req = Request.unmarshal_at s !buf in
     Lwt_mutex.with_lock m (fun () ->
     if !debug then print_endline ("<- " ^ (Request.prettyprint req));
     match req with
     | Request.SetPixelFormat pf' ->
         Printf.printf "Setting pixel format to %s\n" (PixelFormat.to_string pf');
 	pf := pf';
+        let max_size_needed = w * h * (PixelFormat.bytes_per_pixel !pf) + (FramebufferUpdate.sizeof []) in
+        if max_size_needed > (Cstruct.len !buf)
+        then buf := Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout max_size_needed));
         return ()
     | Request.KeyEvent { KeyEvent.down = false; key = key } ->
         (try_lwt
@@ -209,7 +214,7 @@ let server (s: Lwt_unix.file_descr) window font =
             print_endline (FramebufferUpdate.prettyprint x);
           ) update;
       end;
-      Rfb_lwt.really_write s (FramebufferUpdate.marshal update);
+      Rfb_lwt.really_write s (FramebufferUpdate.marshal_at update !buf);
     | _ ->
 	if !debug then print_endline "<- ^^ ignoring";
         return ()

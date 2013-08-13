@@ -138,7 +138,9 @@ let animate fps f =
 
 let server (s: Unix.file_descr) =
   let pf = ref (PixelFormat.true_colour_default Sys.big_endian) in
-  Server.handshake "rotate" !pf w h s;
+  let buf = ref (Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout 4096))) in
+
+  Server.handshake "rotate" !pf w h !buf s;
 
   let last_update_seen = ref !update_counter in
   while true do
@@ -146,16 +148,19 @@ let server (s: Unix.file_descr) =
     (* print_endline ("<- " ^ (Request.prettyprint req)); *)
     match req with
     | Request.SetPixelFormat pf' ->
-	pf := pf'
+	pf := pf';
+        let max_size_needed = w * h * (PixelFormat.bytes_per_pixel !pf) + (FramebufferUpdate.sizeof []) in
+        if max_size_needed > (Cstruct.len !buf)
+        then buf := Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout max_size_needed))
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = true } ->
       last_update_seen := wait_update !last_update_seen;
       let update = make_update !pf in
       (* print_endline ("-> " ^ (FramebufferUpdate.prettyprint update)); *)
-      Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ])
+      Rfb_unix.really_write s (FramebufferUpdate.marshal_at [ update ] !buf)
     | Request.FrameBufferUpdateRequest { FramebufferUpdateRequest.incremental = false } ->
       let update = make_update !pf in
       print_endline ("-> " ^ (FramebufferUpdate.prettyprint update));
-      Rfb_unix.really_write s (FramebufferUpdate.marshal [ update ]);
+      Rfb_unix.really_write s (FramebufferUpdate.marshal_at [ update ] !buf);
     | _ ->
 	print_endline "<- ^^ ignoring";
   done

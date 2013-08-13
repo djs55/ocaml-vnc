@@ -42,10 +42,13 @@ let really_write fd buf =
     Cstruct.hexdump c;
   end;
 *)
+  let ofs = buf.Cstruct.off in
+  let len = buf.Cstruct.len in
+  let buf = buf.Cstruct.buffer in
   let rec rwrite fd buf ofs len =
-    lwt n = Lwt_unix.write fd buf ofs len in
+    lwt n = Lwt_bytes.write fd buf ofs len in
     if n = 0 then raise End_of_file;
     if n < len then rwrite fd buf (ofs + n) (len - n) else return () in
-  lwt () = rwrite fd buf 0 (String.length buf) in
+  lwt () = rwrite fd buf ofs len in
   return ()
 
