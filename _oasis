@@ -28,6 +28,13 @@ Library vnc_lwt
   Findlibparent: vnc
   BuildDepends: lwt.unix
 
+Executable parse_test
+  CompiledObject: best
+  Install: false
+  Path: lib_test
+  MainIs: parse_test.ml
+  BuildDepends: lwt,oUnit,vnc
+
 Executable rfb_randomtest
   CompiledObject: best
   Install: false
