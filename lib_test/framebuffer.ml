@@ -178,7 +178,7 @@ let server (s: Lwt_unix.file_descr) window font =
      in
 
   while_lwt true do
-    lwt req = Request.unmarshal_at s !buf in
+    lwt req = Request.unmarshal s !buf in
     Lwt_mutex.with_lock m (fun () ->
     if !debug then print_endline ("<- " ^ (Request.prettyprint req));
     match req with

@@ -144,7 +144,7 @@ let server (s: Unix.file_descr) =
 
   let last_update_seen = ref !update_counter in
   while true do
-    let req = Request.unmarshal s in
+    let req = Request.unmarshal s !buf in
     (* print_endline ("<- " ^ (Request.prettyprint req)); *)
     match req with
     | Request.SetPixelFormat pf' ->

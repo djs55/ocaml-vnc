@@ -22,16 +22,17 @@ let return = Lwt.return
 type fd = Lwt_unix.file_descr
 
 (** Really read, raising End_of_file if no more data *)
-let really_read fd n = 
-  let buf = String.make n '\000' in
+let really_read fd n buf' = 
+  let ofs = buf'.Cstruct.off in
+  let len = buf'.Cstruct.len in
+  let buf = buf'.Cstruct.buffer in
   let rec rread fd buf ofs len = 
-    lwt n = Lwt_unix.read fd buf ofs len in
+    lwt n = Lwt_bytes.read fd buf ofs len in
     if n = 0 then raise End_of_file;
     if n < len then rread fd buf (ofs + n) (len - n) else return () in
-  lwt () = rread fd buf 0 n in
-  let result = Cstruct.create n in
-  Cstruct.blit_from_string buf 0 result 0 n;
-  return result
+  lwt () = rread fd buf ofs n in
+  return (Cstruct.sub buf' 0 n)
+
 let really_write fd buf =
 (*
   Printf.printf "About to write %d bytes\n" (String.length buf);

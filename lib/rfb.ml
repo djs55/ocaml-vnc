@@ -12,25 +12,6 @@
  * GNU Lesser General Public License for more details.
  *)
 
-module type ASYNC = sig
-  type 'a t
-
-  val (>>=): 'a t -> ('a -> 'b t) -> 'b t
-  val return: 'a -> 'a t
-end
-
-module type CHANNEL = sig
-  include ASYNC
-
-  type fd
-
-  val really_read: fd -> int -> Cstruct.t t
-  val really_write: fd -> Cstruct.t -> unit t
-end
-
-module Make = functor(Channel: CHANNEL) -> struct
-  open Channel
-
 module ProtocolVersion = struct
   type t = { major: int; minor: int }
 
@@ -58,19 +39,42 @@ module ProtocolVersion = struct
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout sizeof_hdr)) in
     Cstruct.to_string (marshal_at x buf)
 
-  let unmarshal_at (s: Channel.fd) x =
+  let unmarshal_at x =
     if copy_hdr_rfb x <> "RFB "
     then raise Unmarshal_failure;
     let major = int_of_string (copy_hdr_major x) in
     let minor = int_of_string (copy_hdr_minor x) in
-    return { major = major; minor = minor }
-
-  let unmarshal (s: Channel.fd) = 
-    really_read s sizeof_hdr >>= fun x ->
-    unmarshal_at s x
+    { major = major; minor = minor }
 
   let prettyprint (x: t) = 
     Printf.sprintf "ProtocolVersion major = %d minor = %d" x.major x.minor
+end
+
+module type ASYNC = sig
+  type 'a t
+
+  val (>>=): 'a t -> ('a -> 'b t) -> 'b t
+  val return: 'a -> 'a t
+end
+
+module type CHANNEL = sig
+  include ASYNC
+
+  type fd
+
+  val really_read: fd -> int -> Cstruct.t -> Cstruct.t t
+  val really_write: fd -> Cstruct.t -> unit t
+end
+
+module Make = functor(Channel: CHANNEL) -> struct
+  open Channel
+
+module ProtocolVersion = struct
+  include ProtocolVersion
+
+  let unmarshal (s: Channel.fd) buf = 
+    really_read s sizeof_hdr buf >>= fun x ->
+    return (unmarshal_at x)
 end
 
 module Error = struct
@@ -92,10 +96,11 @@ module Error = struct
     marshal_at x buf;
     Cstruct.to_string buf
 
-  let unmarshal (s: Channel.fd) =
-    really_read s sizeof_hdr >>= fun x ->
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun x ->
     let len = get_hdr_length x in
-    really_read s (Int32.to_int len)
+    really_read s (Int32.to_int len) buf >>= fun data ->
+    return (Cstruct.to_string data)
 end
 
 (* 3.3 *)
@@ -134,13 +139,13 @@ module SecurityType = struct
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
     Cstruct.to_string (marshal_at x buf)
 
-  let unmarshal (s: Channel.fd) =
-    really_read s sizeof_hdr >>= fun x -> 
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun x -> 
     match int_to_code (get_hdr_ty x) with
     | None -> return (`Error(Failure "unknown SecurityType"))
     | Some FAILED ->
-      Error.unmarshal s >>= fun x ->
-      return (`Ok (Failed (Cstruct.to_string x)))
+      Error.unmarshal s buf >>= fun x ->
+      return (`Ok (Failed x))
     | Some NOSECURITY -> return (`Ok NoSecurity)
     | Some VNCAUTH -> return (`Ok VNCAuth)
 end
@@ -166,8 +171,8 @@ module ClientInit = struct
     let shared = get_hdr_shared x in
     return (shared <> 0)
 
-  let unmarshal (s: Channel.fd) =
-    really_read s sizeof_hdr >>= fun x ->
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun x ->
     unmarshal_at s x
 end
 
@@ -250,8 +255,8 @@ module PixelFormat = struct
     | 1 -> 0
     | n -> log2 (n / 2) + 1
 
-  let unmarshal (s: Channel.fd) =
-    really_read s sizeof_hdr >>= fun buf ->
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun buf ->
     let bpp = bpp_of_int (get_hdr_bpp buf) in
     let depth = get_hdr_depth buf in
     let big_endian = get_hdr_big_endian buf <> 0 in
@@ -344,9 +349,9 @@ module SetPixelFormat = struct
     marshal_at x buf;
     Cstruct.to_string buf
 
-  let unmarshal (s: Channel.fd) =
-    really_read s sizeof_hdr >>= fun _ ->
-    PixelFormat.unmarshal s
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun _ ->
+    PixelFormat.unmarshal s buf
 
   let prettyprint (x: t) = 
     Printf.sprintf "SetPixelFormat %s" (PixelFormat.to_string x) 
@@ -391,6 +396,38 @@ module Encoding = struct
     | _     -> None
 end
 
+module ClientRequestType = struct
+  type t =
+    | SetPixelFormat
+    | SetEncodings
+    | FramebufferUpdateRequest
+    | KeyEvent
+    | PointerEvent
+    | ClientCutText
+
+  exception Unknown_client_request_type of int
+
+  let of_int = function
+    | 0 -> `Ok SetPixelFormat
+    | 2 -> `Ok SetEncodings
+    | 3 -> `Ok FramebufferUpdateRequest
+    | 4 -> `Ok KeyEvent
+    | 5 -> `Ok PointerEvent
+    | 6 -> `Ok ClientCutText
+    | n -> `Error (Unknown_client_request_type n)
+
+  let to_int = function
+    | SetPixelFormat           -> 0
+    | SetEncodings             -> 2
+    | FramebufferUpdateRequest -> 3
+    | KeyEvent                 -> 4
+    | PointerEvent             -> 5
+    | ClientCutText            -> 6
+
+  let unmarshal_at x = of_int (Cstruct.get_uint8 x 0)
+
+end
+
 module SetEncodings = struct
   type t = Encoding.t list
 
@@ -399,14 +436,14 @@ module SetEncodings = struct
     uint16_t nr_encodings
   } as big_endian
 
-  let unmarshal (s: Channel.fd) =
-    really_read s sizeof_hdr >>= fun x ->
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun x ->
     let num = get_hdr_nr_encodings x in
     let rec loop acc n =
       if n > num
       then return (List.rev acc)
       else
-        really_read s 4 >>= fun x ->
+        really_read s 4 buf >>= fun x ->
         match Encoding.of_int32 (Cstruct.BE.get_uint32 x 0) with
         | None -> loop acc (n + 1)
         | Some e -> loop (e :: acc) (n + 1) in
@@ -429,8 +466,8 @@ module FramebufferUpdateRequest = struct
     uint16_t height
   } as big_endian
 
-  let unmarshal (s: Channel.fd) = 
-    really_read s sizeof_hdr >>= fun buf ->
+  let unmarshal (s: Channel.fd) buf = 
+    really_read s sizeof_hdr buf >>= fun buf ->
     let incremental = get_hdr_incremental buf <> 0 in
     let x = get_hdr_x buf in
     let y = get_hdr_y buf in
@@ -633,8 +670,8 @@ module KeyEvent = struct
     uint32_t key
   } as big_endian
 
-  let unmarshal (s: Channel.fd) =
-    really_read s sizeof_hdr >>= fun buf ->
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun buf ->
     let down = get_hdr_down buf <> 0 in
     let key = get_hdr_key buf in
     return { down; key }
@@ -653,8 +690,8 @@ module PointerEvent = struct
     uint16_t y
   } as big_endian
 
-  let unmarshal (s: Channel.fd) =
-    really_read s sizeof_hdr >>= fun buf ->
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun buf ->
     let mask = get_hdr_mask buf in
     let x = get_hdr_x buf in
     let y = get_hdr_y buf in
@@ -673,10 +710,10 @@ module ClientCutText = struct
     uint32_t length
   } as big_endian
 
-  let unmarshal (s: Channel.fd) =
-    really_read s sizeof_hdr >>= fun buf ->
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun buf ->
     let length = get_hdr_length buf in
-    really_read s (Int32.to_int length) >>= fun buf ->
+    really_read s (Int32.to_int length) buf >>= fun buf ->
     return (Cstruct.to_string buf)
   let prettyprint (x: t) = 
     Printf.sprintf "ClientCutText { %s }" x
@@ -699,29 +736,28 @@ module Request = struct
     | PointerEvent x -> PointerEvent.prettyprint x
     | ClientCutText x -> ClientCutText.prettyprint x
 
-  let unmarshal (s: Channel.fd) =
-    really_read s 1 >>= fun x ->
-    match Cstruct.get_uint8 x 0 with
-    | 0 ->
-        SetPixelFormat.unmarshal s >>= fun x ->
+  let unmarshal (s: Channel.fd) buf =
+    really_read s 1 buf >>= fun x ->
+    match ClientRequestType.unmarshal_at x with
+    | `Ok ClientRequestType.SetPixelFormat ->
+        SetPixelFormat.unmarshal s buf >>= fun x ->
 	return (SetPixelFormat x)
-    | 2 ->
-        SetEncodings.unmarshal s >>= fun x ->
+    | `Ok ClientRequestType.SetEncodings ->
+        SetEncodings.unmarshal s buf >>= fun x ->
 	return (SetEncodings x)
-    | 3 ->
-        FramebufferUpdateRequest.unmarshal s >>= fun x ->
+    | `Ok ClientRequestType.FramebufferUpdateRequest ->
+        FramebufferUpdateRequest.unmarshal s buf >>= fun x ->
 	return (FrameBufferUpdateRequest x)
-    | 4 ->
-        KeyEvent.unmarshal s >>= fun x ->
+    | `Ok ClientRequestType.KeyEvent ->
+        KeyEvent.unmarshal s buf >>= fun x ->
 	return (KeyEvent x)
-    | 5 ->
-        PointerEvent.unmarshal s >>= fun x ->
+    | `Ok ClientRequestType.PointerEvent ->
+        PointerEvent.unmarshal s buf >>= fun x ->
 	return (PointerEvent x)
-    | 6 ->
-        ClientCutText.unmarshal s >>= fun x ->
+    | `Ok ClientRequestType.ClientCutText ->
+        ClientCutText.unmarshal s buf >>= fun x ->
 	return (ClientCutText x)
-    | x ->
-	failwith (Printf.sprintf "Unknown message type: %d" x)
+    | `Error e -> raise e
 end
 
 
@@ -731,9 +767,9 @@ let black = (0, 0, 0)
 let handshake name pixelformat w h buf (s: Channel.fd) =
   let ver = { ProtocolVersion.major = 3; minor = 3 } in
   really_write s (ProtocolVersion.marshal_at ver buf) >>= fun () ->
-  ProtocolVersion.unmarshal_at s buf >>= fun ver' ->
+  ProtocolVersion.unmarshal s buf >>= fun ver' ->
   really_write s (SecurityType.marshal_at SecurityType.NoSecurity buf) >>= fun () ->
-  ClientInit.unmarshal_at s buf >>= fun ci ->
+  ClientInit.unmarshal s buf >>= fun ci ->
   if ci then print_endline "Client requests a shared display"
   else print_endline "Client requests a non-shared display";
   let si = { ServerInit.name; pixelformat; width = w; height = h } in

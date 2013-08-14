@@ -20,16 +20,15 @@ let return x = x
 type fd = Unix.file_descr
 
 (** Really read, raising End_of_file if no more data *)
-let really_read fd n = 
+let really_read fd n buffer = 
   let buf = String.make n '\000' in
   let rec rread fd buf ofs len = 
     let n = Unix.read fd buf ofs len in
     if n = 0 then raise End_of_file;
     if n < len then rread fd buf (ofs + n) (len - n) in
   rread fd buf 0 n;
-  let result = Cstruct.create n in
-  Cstruct.blit_from_string buf 0 result 0 n;
-  result
+  Cstruct.blit_from_string buf 0 buffer 0 n;
+  Cstruct.sub buffer 0 n
 let really_write fd buf = 
 (*
   Printf.printf "About to write %d bytes [ %s ]\n"

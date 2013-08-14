@@ -27,7 +27,7 @@ let server (s: Unix.file_descr) =
 
   let update_thread = ref None in
   while true do
-    let req = Request.unmarshal s in
+    let req = Request.unmarshal s !buf in
     print_endline ("<- " ^ (Request.prettyprint req));
     match req with
     | Request.SetPixelFormat pf' ->
