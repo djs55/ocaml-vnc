@@ -268,12 +268,15 @@ module SetPixelFormat = struct
   type t = PixelFormat.t
 
   cstruct hdr {
+    uint8_t ty;
     uint8_t padding[3]
   } as big_endian
 
   let sizeof _ = sizeof_hdr + PixelFormat.sizeof_hdr
 
   let marshal_at (x: t) buf =
+    set_hdr_ty buf 0;
+    set_hdr_padding "\000\000\000" 0 buf;
     PixelFormat.marshal_at x (Cstruct.shift buf sizeof_hdr);
     Cstruct.sub buf 0 (sizeof x)
 
