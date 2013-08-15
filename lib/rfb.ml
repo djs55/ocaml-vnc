@@ -231,6 +231,39 @@ module ServerInit = struct
     Cstruct.to_string (marshal_at x buf)
 end
 
+module Pixel = struct
+  open PixelFormat
+
+  let encode pf r g b =
+    if pf.true_colour then begin
+      let r' = r lsr (8 - pf.red_max_n) in
+      let g' = g lsr (8 - pf.green_max_n) in
+      let b' = b lsr (8 - pf.blue_max_n) in
+      (r' lsl pf.red_shift) lor (g' lsl pf.green_shift) lor (b' lsl pf.blue_shift)
+    end else failwith "implement colour maps"
+
+  let write pf buf ofs pixel =
+    match pf.PixelFormat.bpp, pf.PixelFormat.big_endian with
+    | BPP_8, _ ->
+      buf.[ofs] <- char_of_int pixel
+    | BPP_16, true ->
+      buf.[ofs + 0] <- char_of_int (pixel lsr 8);
+      buf.[ofs + 1] <- char_of_int (pixel land 0xff)
+    | BPP_16, false ->
+      buf.[ofs + 0] <- char_of_int (pixel land 0xff);
+      buf.[ofs + 1] <- char_of_int (pixel lsr 8)
+    | BPP_32, true ->
+      buf.[ofs + 0] <- char_of_int (pixel lsr 16);
+      buf.[ofs + 1] <- char_of_int ((pixel lsr 8) land 0xff);
+      buf.[ofs + 2] <- char_of_int (pixel land 0xff);
+      buf.[ofs + 3] <- char_of_int 0
+    | BPP_32, false ->
+      buf.[ofs + 0] <- char_of_int (pixel land 0xff);
+      buf.[ofs + 1] <- char_of_int ((pixel lsr 8) land 0xff);
+      buf.[ofs + 2] <- char_of_int (pixel lsr 16);
+      buf.[ofs + 3] <- char_of_int 0
+end
+
 module type ASYNC = sig
   type 'a t
 
@@ -318,39 +351,6 @@ module PixelFormat = struct
     return { bpp; depth; big_endian; true_colour;
       red_max_n; green_max_n; blue_max_n;
       red_shift; green_shift; blue_shift }
-end
-
-module Pixel = struct
-  open PixelFormat
-
-  let encode pf r g b =
-    if pf.true_colour then begin
-      let r' = r lsr (8 - pf.red_max_n) in
-      let g' = g lsr (8 - pf.green_max_n) in
-      let b' = b lsr (8 - pf.blue_max_n) in
-      (r' lsl pf.red_shift) lor (g' lsl pf.green_shift) lor (b' lsl pf.blue_shift)
-    end else failwith "implement colour maps"
-
-  let write pf buf ofs pixel =
-    match pf.PixelFormat.bpp, pf.PixelFormat.big_endian with
-    | BPP_8, _ ->
-      buf.[ofs] <- char_of_int pixel
-    | BPP_16, true ->
-      buf.[ofs + 0] <- char_of_int (pixel lsr 8);
-      buf.[ofs + 1] <- char_of_int (pixel land 0xff)
-    | BPP_16, false ->
-      buf.[ofs + 0] <- char_of_int (pixel land 0xff);
-      buf.[ofs + 1] <- char_of_int (pixel lsr 8)
-    | BPP_32, true ->
-      buf.[ofs + 0] <- char_of_int (pixel lsr 16);
-      buf.[ofs + 1] <- char_of_int ((pixel lsr 8) land 0xff);
-      buf.[ofs + 2] <- char_of_int (pixel land 0xff);
-      buf.[ofs + 3] <- char_of_int 0
-    | BPP_32, false ->
-      buf.[ofs + 0] <- char_of_int (pixel land 0xff);
-      buf.[ofs + 1] <- char_of_int ((pixel lsr 8) land 0xff);
-      buf.[ofs + 2] <- char_of_int (pixel lsr 16);
-      buf.[ofs + 3] <- char_of_int 0
 end
 
 module SetPixelFormat = struct
