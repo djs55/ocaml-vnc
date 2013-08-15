@@ -141,7 +141,7 @@ let wait_for_update c =
 
 let server (s: Lwt_unix.file_descr) window font = 
   let pf = ref (PixelFormat.true_colour_default Sys.big_endian) in
-  let buf = ref (Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout 4096))) in
+  let buf = ref (Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout 409600))) in
 
   lwt () = Server.handshake "console" !pf w h !buf s in
 
