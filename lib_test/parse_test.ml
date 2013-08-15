@@ -61,6 +61,11 @@ let serverinit () =
   let buf' = ServerInit.marshal_at x buf in
   check buf' expected
 
+let setpixelformat () =
+  let expected = [ 0; 0; 0; 0; ] @ example_pixelformat_expected in
+  let buf' = SetPixelFormat.marshal_at example_pixelformat buf in
+  check buf' expected
+
 let _ =
   let verbose = ref false in
   Arg.parse [
@@ -74,6 +79,7 @@ let _ =
       "securitytype_none" >:: securitytype_none;
       "clientinit" >:: clientinit;
       "serverinit" >:: serverinit;
+      "setpixelformat" >:: setpixelformat;
     ] in
   run_test_tt ~verbose:!verbose suite
 

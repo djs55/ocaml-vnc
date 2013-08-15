@@ -264,6 +264,28 @@ module Pixel = struct
       buf.[ofs + 3] <- char_of_int 0
 end
 
+module SetPixelFormat = struct
+  type t = PixelFormat.t
+
+  cstruct hdr {
+    uint8_t padding[3]
+  } as big_endian
+
+  let sizeof _ = sizeof_hdr + PixelFormat.sizeof_hdr
+
+  let marshal_at (x: t) buf =
+    PixelFormat.marshal_at x (Cstruct.shift buf sizeof_hdr);
+    Cstruct.sub buf 0 (sizeof x)
+
+  let marshal (x: t) = 
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
+    marshal_at x buf;
+    Cstruct.to_string buf
+
+  let prettyprint (x: t) = 
+    Printf.sprintf "SetPixelFormat %s" (PixelFormat.to_string x) 
+end
+
 module type ASYNC = sig
   type 'a t
 
@@ -354,28 +376,11 @@ module PixelFormat = struct
 end
 
 module SetPixelFormat = struct
-  type t = PixelFormat.t
-
-  cstruct hdr {
-    uint8_t padding[3]
-  } as big_endian
-
-  let sizeof _ = sizeof_hdr + PixelFormat.sizeof_hdr
-
-  let marshal_at (x: t) buf =
-    PixelFormat.marshal_at x (Cstruct.shift buf sizeof_hdr)
-
-  let marshal (x: t) = 
-    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
-    marshal_at x buf;
-    Cstruct.to_string buf
+  include SetPixelFormat
 
   let unmarshal (s: Channel.fd) buf =
     really_read s sizeof_hdr buf >>= fun _ ->
     PixelFormat.unmarshal s buf
-
-  let prettyprint (x: t) = 
-    Printf.sprintf "SetPixelFormat %s" (PixelFormat.to_string x) 
 end
 
 module Encoding = struct
