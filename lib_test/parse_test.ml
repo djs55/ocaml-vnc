@@ -34,6 +34,12 @@ let securitytype_none () =
   let buf' = SecurityType.marshal_at x buf in
   check buf' expected
 
+let clientinit () =
+  let x = false in
+  let expected = [ 0 ] in
+  let buf' = ClientInit.marshal_at x buf in
+  check buf' expected
+
 let _ =
   let verbose = ref false in
   Arg.parse [
@@ -45,6 +51,7 @@ let _ =
     [
       "protocolversion" >:: protocolversion;
       "securitytype_none" >:: securitytype_none;
+      "clientinit" >:: clientinit;
     ] in
   run_test_tt ~verbose:!verbose suite
 

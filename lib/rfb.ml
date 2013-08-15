@@ -108,6 +108,26 @@ module SecurityType = struct
 
 end
 
+module ClientInit = struct
+  type t = bool (* shared-flag *)
+
+  cstruct hdr {
+    uint8_t shared
+  } as big_endian
+
+  let sizeof = sizeof_hdr
+
+  let marshal_at (x: t) buf =
+    set_hdr_shared buf (if x then 1 else 0);
+    Cstruct.sub buf 0 sizeof
+
+  let marshal (x: t) =
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout sizeof)) in
+    marshal_at x buf;
+    Cstruct.to_string buf
+
+end
+
 module type ASYNC = sig
   type 'a t
 
@@ -161,21 +181,7 @@ module SecurityType = struct
 end
 
 module ClientInit = struct
-  type t = bool (* shared-flag *)
-
-  cstruct hdr {
-    uint8_t shared
-  } as big_endian
-
-  let sizeof = sizeof_hdr
-
-  let marshal_at (x: t) buf =
-    set_hdr_shared buf (if x then 1 else 0)
-
-  let marshal (x: t) =
-    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout sizeof)) in
-    marshal_at x buf;
-    Cstruct.to_string buf
+  include ClientInit
 
   let unmarshal_at (s: Channel.fd) x =
     let shared = get_hdr_shared x in
