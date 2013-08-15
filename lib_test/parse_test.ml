@@ -19,7 +19,7 @@ let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout 4096))
 let check c hex =
   assert_equal ~printer:string_of_int (List.length hex) (Cstruct.len c);
   List.iteri (fun i x ->
-    assert_equal ~printer:string_of_int x (Cstruct.get_uint8 c i)
+    assert_equal ~printer:(fun x -> Printf.sprintf "at offset %d: %d" i x) x (Cstruct.get_uint8 c i)
   ) hex
 
 let protocolversion () =
@@ -53,7 +53,7 @@ let example_pixelformat = {
   blue_shift = 8;
 }
 
-let example_pixelformat_expected = [ 8; 13; 0; 0; 0; 3; 0; 4; 0; 5; 6; 7; 8; 0; 0; 0]
+let example_pixelformat_expected = [ 8; 13; 0; 0; 0; 7; 0; 15; 0; 31; 6; 7; 8; 0; 0; 0]
 
 let serverinit () =
   let x = { ServerInit.width = 7; height = 11; pixelformat = example_pixelformat; name = "hello" } in
