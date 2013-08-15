@@ -40,6 +40,27 @@ let clientinit () =
   let buf' = ClientInit.marshal_at x buf in
   check buf' expected
 
+let example_pixelformat = {
+  PixelFormat.bpp = PixelFormat.BPP_8;
+  depth = 13;
+  big_endian = false;
+  true_colour = false;
+  red_max_n = 3;
+  green_max_n = 4;
+  blue_max_n = 5;
+  red_shift = 6;
+  green_shift = 7;
+  blue_shift = 8;
+}
+
+let example_pixelformat_expected = [ 8; 13; 0; 0; 0; 3; 0; 4; 0; 5; 6; 7; 8; 0; 0; 0]
+
+let serverinit () =
+  let x = { ServerInit.width = 7; height = 11; pixelformat = example_pixelformat; name = "hello" } in
+  let expected = [ 0; 7; 0; 11 ] @ example_pixelformat_expected @ [ 0; 0; 0; 5; int_of_char 'h'; int_of_char 'e'; int_of_char 'l'; int_of_char 'l'; int_of_char 'o' ] in
+  let buf' = ServerInit.marshal_at x buf in
+  check buf' expected
+
 let _ =
   let verbose = ref false in
   Arg.parse [
@@ -52,6 +73,7 @@ let _ =
       "protocolversion" >:: protocolversion;
       "securitytype_none" >:: securitytype_none;
       "clientinit" >:: clientinit;
+      "serverinit" >:: serverinit;
     ] in
   run_test_tt ~verbose:!verbose suite
 

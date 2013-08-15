@@ -128,70 +128,6 @@ module ClientInit = struct
 
 end
 
-module type ASYNC = sig
-  type 'a t
-
-  val (>>=): 'a t -> ('a -> 'b t) -> 'b t
-  val return: 'a -> 'a t
-end
-
-module type CHANNEL = sig
-  include ASYNC
-
-  type fd
-
-  val really_read: fd -> int -> Cstruct.t -> Cstruct.t t
-  val really_write: fd -> Cstruct.t -> unit t
-end
-
-module Make = functor(Channel: CHANNEL) -> struct
-  open Channel
-
-module ProtocolVersion = struct
-  include ProtocolVersion
-
-  let unmarshal (s: Channel.fd) buf = 
-    really_read s sizeof_hdr buf >>= fun x ->
-    return (unmarshal_at x)
-end
-
-module Error = struct
-  include Error
-
-  let unmarshal (s: Channel.fd) buf =
-    really_read s sizeof_hdr buf >>= fun x ->
-    let len = get_hdr_length x in
-    really_read s (Int32.to_int len) buf >>= fun data ->
-    return (Cstruct.to_string data)
-end
-
-module SecurityType = struct
-  include SecurityType
-
-  let unmarshal (s: Channel.fd) buf =
-    really_read s sizeof_hdr buf >>= fun x -> 
-    match int_to_code (get_hdr_ty x) with
-    | None -> return (`Error(Failure "unknown SecurityType"))
-    | Some FAILED ->
-      Error.unmarshal s buf >>= fun x ->
-      return (`Ok (Failed x))
-    | Some NOSECURITY -> return (`Ok NoSecurity)
-    | Some VNCAUTH -> return (`Ok VNCAuth)
-
-end
-
-module ClientInit = struct
-  include ClientInit
-
-  let unmarshal_at (s: Channel.fd) x =
-    let shared = get_hdr_shared x in
-    return (shared <> 0)
-
-  let unmarshal (s: Channel.fd) buf =
-    really_read s sizeof_hdr buf >>= fun x ->
-    unmarshal_at s x
-end
-
 module PixelFormat = struct
   type bpp = BPP_8 | BPP_16 | BPP_32
 
@@ -266,6 +202,102 @@ module PixelFormat = struct
 
   exception Illegal_colour_max
 
+end
+
+module ServerInit = struct
+  type t = { width: int; height: int;
+	     name: string;
+	     pixelformat: PixelFormat.t }
+
+  cstruct hdr {
+    uint16_t width;
+    uint16_t height;
+    uint8_t pixelformat[16];
+    uint32_t name_length
+  } as big_endian
+
+  let sizeof x = sizeof_hdr + (String.length x.name)
+
+  let marshal_at (x: t) buf =
+    set_hdr_width buf x.width;
+    set_hdr_height buf x.height;
+    PixelFormat.marshal_at x.pixelformat (Cstruct.shift buf 4);
+    set_hdr_name_length buf (Int32.of_int (String.length x.name));
+    Cstruct.blit_from_string x.name 0 buf sizeof_hdr (String.length x.name);
+    Cstruct.sub buf 0 (sizeof x)
+
+  let marshal (x: t) =
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
+    Cstruct.to_string (marshal_at x buf)
+end
+
+module type ASYNC = sig
+  type 'a t
+
+  val (>>=): 'a t -> ('a -> 'b t) -> 'b t
+  val return: 'a -> 'a t
+end
+
+module type CHANNEL = sig
+  include ASYNC
+
+  type fd
+
+  val really_read: fd -> int -> Cstruct.t -> Cstruct.t t
+  val really_write: fd -> Cstruct.t -> unit t
+end
+
+module Make = functor(Channel: CHANNEL) -> struct
+  open Channel
+
+module ProtocolVersion = struct
+  include ProtocolVersion
+
+  let unmarshal (s: Channel.fd) buf = 
+    really_read s sizeof_hdr buf >>= fun x ->
+    return (unmarshal_at x)
+end
+
+module Error = struct
+  include Error
+
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun x ->
+    let len = get_hdr_length x in
+    really_read s (Int32.to_int len) buf >>= fun data ->
+    return (Cstruct.to_string data)
+end
+
+module SecurityType = struct
+  include SecurityType
+
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun x -> 
+    match int_to_code (get_hdr_ty x) with
+    | None -> return (`Error(Failure "unknown SecurityType"))
+    | Some FAILED ->
+      Error.unmarshal s buf >>= fun x ->
+      return (`Ok (Failed x))
+    | Some NOSECURITY -> return (`Ok NoSecurity)
+    | Some VNCAUTH -> return (`Ok VNCAuth)
+
+end
+
+module ClientInit = struct
+  include ClientInit
+
+  let unmarshal_at (s: Channel.fd) x =
+    let shared = get_hdr_shared x in
+    return (shared <> 0)
+
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun x ->
+    unmarshal_at s x
+end
+
+module PixelFormat = struct
+  include PixelFormat
+
   let rec log2 = function
     | 0 -> raise Illegal_colour_max
     | 1 -> 0
@@ -319,33 +351,6 @@ module Pixel = struct
       buf.[ofs + 1] <- char_of_int ((pixel lsr 8) land 0xff);
       buf.[ofs + 2] <- char_of_int (pixel lsr 16);
       buf.[ofs + 3] <- char_of_int 0
-end
-
-module ServerInit = struct
-  type t = { width: int; height: int;
-	     name: string;
-	     pixelformat: PixelFormat.t }
-
-  cstruct hdr {
-    uint16_t width;
-    uint16_t height;
-    uint8_t pixelformat[16];
-    uint32_t name_length
-  } as big_endian
-
-  let sizeof x = sizeof_hdr + (String.length x.name)
-
-  let marshal_at (x: t) buf =
-    set_hdr_width buf x.width;
-    set_hdr_height buf x.height;
-    PixelFormat.marshal_at x.pixelformat (Cstruct.shift buf 4);
-    set_hdr_name_length buf (Int32.of_int (String.length x.name));
-    Cstruct.blit_from_string x.name 0 buf sizeof_hdr (String.length x.name);
-    Cstruct.sub buf 0 (sizeof x)
-
-  let marshal (x: t) =
-    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
-    Cstruct.to_string (marshal_at x buf)
 end
 
 module SetPixelFormat = struct
