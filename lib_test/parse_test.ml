@@ -66,6 +66,11 @@ let setpixelformat () =
   let buf' = SetPixelFormat.marshal_at example_pixelformat buf in
   check buf' expected
 
+let fbu_0 () =
+  let expected = [ 0; 0; 0; 0 ] in
+  let buf' = FramebufferUpdate.marshal_at [] buf in
+  check buf' expected
+
 let _ =
   let verbose = ref false in
   Arg.parse [
@@ -80,6 +85,7 @@ let _ =
       "clientinit" >:: clientinit;
       "serverinit" >:: serverinit;
       "setpixelformat" >:: setpixelformat;
+      "fbu_0" >:: fbu_0;
     ] in
   run_test_tt ~verbose:!verbose suite
 
