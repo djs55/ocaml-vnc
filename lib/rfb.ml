@@ -264,6 +264,38 @@ module Pixel = struct
       buf.[ofs + 3] <- char_of_int 0
 end
 
+module ClientRequestType = struct
+  type t =
+    | SetPixelFormat
+    | SetEncodings
+    | FramebufferUpdateRequest
+    | KeyEvent
+    | PointerEvent
+    | ClientCutText
+
+  exception Unknown_client_request_type of int
+
+  let of_int = function
+    | 0 -> `Ok SetPixelFormat
+    | 2 -> `Ok SetEncodings
+    | 3 -> `Ok FramebufferUpdateRequest
+    | 4 -> `Ok KeyEvent
+    | 5 -> `Ok PointerEvent
+    | 6 -> `Ok ClientCutText
+    | n -> `Error (Unknown_client_request_type n)
+
+  let to_int = function
+    | SetPixelFormat           -> 0
+    | SetEncodings             -> 2
+    | FramebufferUpdateRequest -> 3
+    | KeyEvent                 -> 4
+    | PointerEvent             -> 5
+    | ClientCutText            -> 6
+
+  let unmarshal_at x = of_int (Cstruct.get_uint8 x 0)
+
+end
+
 module SetPixelFormat = struct
   type t = PixelFormat.t
 
@@ -275,7 +307,7 @@ module SetPixelFormat = struct
   let sizeof _ = sizeof_hdr + PixelFormat.sizeof_hdr
 
   let marshal_at (x: t) buf =
-    set_hdr_ty buf 0;
+    set_hdr_ty buf (ClientRequestType.(to_int SetPixelFormat));
     set_hdr_padding "\000\000\000" 0 buf;
     PixelFormat.marshal_at x (Cstruct.shift buf sizeof_hdr);
     Cstruct.sub buf 0 (sizeof x)
@@ -287,6 +319,45 @@ module SetPixelFormat = struct
 
   let prettyprint (x: t) = 
     Printf.sprintf "SetPixelFormat %s" (PixelFormat.to_string x) 
+end
+
+module Encoding = struct
+  type t =
+    | Raw
+    | CopyRect
+    | RRE
+    | Hextile	
+    | ZRLE
+    | Cursor
+    | DesktopSize
+
+  let to_string = function
+    | Raw         -> "Raw"
+    | CopyRect    -> "CopyRect"
+    | RRE         -> "RRE"
+    | Hextile     -> "Hextile"
+    | ZRLE        -> "ZRLE"
+    | Cursor      -> "Cursor"
+    | DesktopSize -> "DesktopSize"
+
+  let to_int32 = function
+    | Raw         -> 0l
+    | CopyRect    -> 1l
+    | RRE         -> 2l
+    | Hextile     -> 5l
+    | ZRLE        -> 16l
+    | Cursor      -> -239l
+    | DesktopSize -> -223l
+
+  let of_int32 = function
+    | 0l    -> Some Raw
+    | 1l    -> Some CopyRect
+    | 2l    -> Some RRE
+    | 5l    -> Some Hextile
+    | 16l   -> Some ZRLE
+    | -239l -> Some Cursor
+    | -223l -> Some DesktopSize
+    | _     -> None
 end
 
 module type ASYNC = sig
@@ -384,77 +455,6 @@ module SetPixelFormat = struct
   let unmarshal (s: Channel.fd) buf =
     really_read s sizeof_hdr buf >>= fun _ ->
     PixelFormat.unmarshal s buf
-end
-
-module Encoding = struct
-  type t =
-    | Raw
-    | CopyRect
-    | RRE
-    | Hextile	
-    | ZRLE
-    | Cursor
-    | DesktopSize
-
-  let to_string = function
-    | Raw         -> "Raw"
-    | CopyRect    -> "CopyRect"
-    | RRE         -> "RRE"
-    | Hextile     -> "Hextile"
-    | ZRLE        -> "ZRLE"
-    | Cursor      -> "Cursor"
-    | DesktopSize -> "DesktopSize"
-
-  let to_int32 = function
-    | Raw         -> 0l
-    | CopyRect    -> 1l
-    | RRE         -> 2l
-    | Hextile     -> 5l
-    | ZRLE        -> 16l
-    | Cursor      -> -239l
-    | DesktopSize -> -223l
-
-  let of_int32 = function
-    | 0l    -> Some Raw
-    | 1l    -> Some CopyRect
-    | 2l    -> Some RRE
-    | 5l    -> Some Hextile
-    | 16l   -> Some ZRLE
-    | -239l -> Some Cursor
-    | -223l -> Some DesktopSize
-    | _     -> None
-end
-
-module ClientRequestType = struct
-  type t =
-    | SetPixelFormat
-    | SetEncodings
-    | FramebufferUpdateRequest
-    | KeyEvent
-    | PointerEvent
-    | ClientCutText
-
-  exception Unknown_client_request_type of int
-
-  let of_int = function
-    | 0 -> `Ok SetPixelFormat
-    | 2 -> `Ok SetEncodings
-    | 3 -> `Ok FramebufferUpdateRequest
-    | 4 -> `Ok KeyEvent
-    | 5 -> `Ok PointerEvent
-    | 6 -> `Ok ClientCutText
-    | n -> `Error (Unknown_client_request_type n)
-
-  let to_int = function
-    | SetPixelFormat           -> 0
-    | SetEncodings             -> 2
-    | FramebufferUpdateRequest -> 3
-    | KeyEvent                 -> 4
-    | PointerEvent             -> 5
-    | ClientCutText            -> 6
-
-  let unmarshal_at x = of_int (Cstruct.get_uint8 x 0)
-
 end
 
 module SetEncodings = struct
