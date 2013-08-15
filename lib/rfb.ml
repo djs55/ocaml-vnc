@@ -50,33 +50,6 @@ module ProtocolVersion = struct
     Printf.sprintf "ProtocolVersion major = %d minor = %d" x.major x.minor
 end
 
-module type ASYNC = sig
-  type 'a t
-
-  val (>>=): 'a t -> ('a -> 'b t) -> 'b t
-  val return: 'a -> 'a t
-end
-
-module type CHANNEL = sig
-  include ASYNC
-
-  type fd
-
-  val really_read: fd -> int -> Cstruct.t -> Cstruct.t t
-  val really_write: fd -> Cstruct.t -> unit t
-end
-
-module Make = functor(Channel: CHANNEL) -> struct
-  open Channel
-
-module ProtocolVersion = struct
-  include ProtocolVersion
-
-  let unmarshal (s: Channel.fd) buf = 
-    really_read s sizeof_hdr buf >>= fun x ->
-    return (unmarshal_at x)
-end
-
 module Error = struct
   type t = string
 
@@ -95,12 +68,6 @@ module Error = struct
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
     marshal_at x buf;
     Cstruct.to_string buf
-
-  let unmarshal (s: Channel.fd) buf =
-    really_read s sizeof_hdr buf >>= fun x ->
-    let len = get_hdr_length x in
-    really_read s (Int32.to_int len) buf >>= fun data ->
-    return (Cstruct.to_string data)
 end
 
 (* 3.3 *)
@@ -139,6 +106,48 @@ module SecurityType = struct
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
     Cstruct.to_string (marshal_at x buf)
 
+end
+
+module type ASYNC = sig
+  type 'a t
+
+  val (>>=): 'a t -> ('a -> 'b t) -> 'b t
+  val return: 'a -> 'a t
+end
+
+module type CHANNEL = sig
+  include ASYNC
+
+  type fd
+
+  val really_read: fd -> int -> Cstruct.t -> Cstruct.t t
+  val really_write: fd -> Cstruct.t -> unit t
+end
+
+module Make = functor(Channel: CHANNEL) -> struct
+  open Channel
+
+module ProtocolVersion = struct
+  include ProtocolVersion
+
+  let unmarshal (s: Channel.fd) buf = 
+    really_read s sizeof_hdr buf >>= fun x ->
+    return (unmarshal_at x)
+end
+
+module Error = struct
+  include Error
+
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun x ->
+    let len = get_hdr_length x in
+    really_read s (Int32.to_int len) buf >>= fun data ->
+    return (Cstruct.to_string data)
+end
+
+module SecurityType = struct
+  include SecurityType
+
   let unmarshal (s: Channel.fd) buf =
     really_read s sizeof_hdr buf >>= fun x -> 
     match int_to_code (get_hdr_ty x) with
@@ -148,6 +157,7 @@ module SecurityType = struct
       return (`Ok (Failed x))
     | Some NOSECURITY -> return (`Ok NoSecurity)
     | Some VNCAUTH -> return (`Ok VNCAuth)
+
 end
 
 module ClientInit = struct
