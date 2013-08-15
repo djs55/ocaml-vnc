@@ -372,6 +372,23 @@ module SetEncodings = struct
     Printf.sprintf "SetEncodings (num=%d) [ %s ]" (List.length x) (String.concat "; " (List.map Encoding.to_string x))
 end
 
+module FramebufferUpdateRequest = struct
+  type t = { incremental: bool;
+	     x: int; y: int;
+	     width: int; height: int }
+
+  cstruct hdr {
+    uint8_t incremental;
+    uint16_t x;
+    uint16_t y;
+    uint16_t width;
+    uint16_t height
+  } as big_endian
+
+  let prettyprint (x: t) = 
+    Printf.sprintf "FrameBufferUpdateRequest (incr=%b x=%d y=%d width=%d height=%d)" x.incremental x.x x.y x.width x.height
+end
+
 module type ASYNC = sig
   type 'a t
 
@@ -487,17 +504,7 @@ module SetEncodings = struct
 end
 
 module FramebufferUpdateRequest = struct
-  type t = { incremental: bool;
-	     x: int; y: int;
-	     width: int; height: int }
-
-  cstruct hdr {
-    uint8_t incremental;
-    uint16_t x;
-    uint16_t y;
-    uint16_t width;
-    uint16_t height
-  } as big_endian
+  include FramebufferUpdateRequest
 
   let unmarshal (s: Channel.fd) buf = 
     really_read s sizeof_hdr buf >>= fun buf ->
@@ -507,9 +514,6 @@ module FramebufferUpdateRequest = struct
     let width = get_hdr_width buf in
     let height = get_hdr_height buf in
     return { incremental; x; y; width; height }
-
-  let prettyprint (x: t) = 
-    Printf.sprintf "FrameBufferUpdateRequest (incr=%b x=%d y=%d width=%d height=%d)" x.incremental x.x x.y x.width x.height
 end
 
 module FramebufferUpdate = struct
