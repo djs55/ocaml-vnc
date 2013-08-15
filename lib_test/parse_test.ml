@@ -71,6 +71,12 @@ let fbu_0 () =
   let buf' = FramebufferUpdate.marshal_at [] buf in
   check buf' expected
 
+let fbu_copyrect () =
+  let x = [ { FramebufferUpdate.x = 16; y = 32; w = 48; h = 64; encoding = FramebufferUpdate.Encoding.CopyRect {FramebufferUpdate.CopyRect.x = 640; y = 480 } } ] in
+  let expected = [ 0; 0; 0; 1; 0; 16; 0; 32; 0; 48; 0; 64; 0; 0; 0; 1; 640 / 0x100; 640 mod 0x100; 480 / 0x100; 480 mod 0x100 ] in
+  let buf' = FramebufferUpdate.marshal_at x buf in
+  check buf' expected
+
 let _ =
   let verbose = ref false in
   Arg.parse [
@@ -86,6 +92,7 @@ let _ =
       "serverinit" >:: serverinit;
       "setpixelformat" >:: setpixelformat;
       "fbu_0" >:: fbu_0;
+      "fbu_copyrect" >:: fbu_copyrect;
     ] in
   run_test_tt ~verbose:!verbose suite
 
