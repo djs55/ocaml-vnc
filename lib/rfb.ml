@@ -389,133 +389,6 @@ module FramebufferUpdateRequest = struct
     Printf.sprintf "FrameBufferUpdateRequest (incr=%b x=%d y=%d width=%d height=%d)" x.incremental x.x x.y x.width x.height
 end
 
-module type ASYNC = sig
-  type 'a t
-
-  val (>>=): 'a t -> ('a -> 'b t) -> 'b t
-  val return: 'a -> 'a t
-end
-
-module type CHANNEL = sig
-  include ASYNC
-
-  type fd
-
-  val really_read: fd -> int -> Cstruct.t -> Cstruct.t t
-  val really_write: fd -> Cstruct.t -> unit t
-end
-
-module Make = functor(Channel: CHANNEL) -> struct
-  open Channel
-
-module ProtocolVersion = struct
-  include ProtocolVersion
-
-  let unmarshal (s: Channel.fd) buf = 
-    really_read s sizeof_hdr buf >>= fun x ->
-    return (unmarshal_at x)
-end
-
-module Error = struct
-  include Error
-
-  let unmarshal (s: Channel.fd) buf =
-    really_read s sizeof_hdr buf >>= fun x ->
-    let len = get_hdr_length x in
-    really_read s (Int32.to_int len) buf >>= fun data ->
-    return (Cstruct.to_string data)
-end
-
-module SecurityType = struct
-  include SecurityType
-
-  let unmarshal (s: Channel.fd) buf =
-    really_read s sizeof_hdr buf >>= fun x -> 
-    match int_to_code (get_hdr_ty x) with
-    | None -> return (`Error(Failure "unknown SecurityType"))
-    | Some FAILED ->
-      Error.unmarshal s buf >>= fun x ->
-      return (`Ok (Failed x))
-    | Some NOSECURITY -> return (`Ok NoSecurity)
-    | Some VNCAUTH -> return (`Ok VNCAuth)
-
-end
-
-module ClientInit = struct
-  include ClientInit
-
-  let unmarshal_at (s: Channel.fd) x =
-    let shared = get_hdr_shared x in
-    return (shared <> 0)
-
-  let unmarshal (s: Channel.fd) buf =
-    really_read s sizeof_hdr buf >>= fun x ->
-    unmarshal_at s x
-end
-
-module PixelFormat = struct
-  include PixelFormat
-
-  let rec log2 = function
-    | 0 -> raise Illegal_colour_max
-    | 1 -> 0
-    | n -> log2 (n / 2) + 1
-
-  let unmarshal (s: Channel.fd) buf =
-    really_read s sizeof_hdr buf >>= fun buf ->
-    let bpp = bpp_of_int (get_hdr_bpp buf) in
-    let depth = get_hdr_depth buf in
-    let big_endian = get_hdr_big_endian buf <> 0 in
-    let true_colour = get_hdr_true_colour buf <> 0 in
-    let red_max_n = log2 (get_hdr_red_max buf + 1) in
-    let green_max_n = log2 (get_hdr_green_max buf + 1) in
-    let blue_max_n = log2 (get_hdr_blue_max buf + 1) in
-    let red_shift = get_hdr_red_shift buf in
-    let green_shift = get_hdr_green_shift buf in
-    let blue_shift = get_hdr_blue_shift buf in
-    return { bpp; depth; big_endian; true_colour;
-      red_max_n; green_max_n; blue_max_n;
-      red_shift; green_shift; blue_shift }
-end
-
-module SetPixelFormat = struct
-  include SetPixelFormat
-
-  let unmarshal (s: Channel.fd) buf =
-    really_read s sizeof_hdr buf >>= fun _ ->
-    PixelFormat.unmarshal s buf
-end
-
-module SetEncodings = struct
-  include SetEncodings
-
-  let unmarshal (s: Channel.fd) buf =
-    really_read s sizeof_hdr buf >>= fun x ->
-    let num = get_hdr_nr_encodings x in
-    let rec loop acc n =
-      if n > num
-      then return (List.rev acc)
-      else
-        really_read s 4 buf >>= fun x ->
-        match Encoding.of_int32 (Cstruct.BE.get_uint32 x 0) with
-        | None -> loop acc (n + 1)
-        | Some e -> loop (e :: acc) (n + 1) in
-    loop [] 1
-end
-
-module FramebufferUpdateRequest = struct
-  include FramebufferUpdateRequest
-
-  let unmarshal (s: Channel.fd) buf = 
-    really_read s sizeof_hdr buf >>= fun buf ->
-    let incremental = get_hdr_incremental buf <> 0 in
-    let x = get_hdr_x buf in
-    let y = get_hdr_y buf in
-    let width = get_hdr_width buf in
-    let height = get_hdr_height buf in
-    return { incremental; x; y; width; height }
-end
-
 module FramebufferUpdate = struct
   module Raw = struct
     (* width * height * bpp *)
@@ -661,6 +534,133 @@ module FramebufferUpdate = struct
   let prettyprint (t: t) =
     Printf.sprintf "Rectangle {x=%d y=%d w=%d h=%d encoding=%s}"
       t.x t.y t.w t.h (Encoding.prettyprint t.encoding)
+end
+
+module type ASYNC = sig
+  type 'a t
+
+  val (>>=): 'a t -> ('a -> 'b t) -> 'b t
+  val return: 'a -> 'a t
+end
+
+module type CHANNEL = sig
+  include ASYNC
+
+  type fd
+
+  val really_read: fd -> int -> Cstruct.t -> Cstruct.t t
+  val really_write: fd -> Cstruct.t -> unit t
+end
+
+module Make = functor(Channel: CHANNEL) -> struct
+  open Channel
+
+module ProtocolVersion = struct
+  include ProtocolVersion
+
+  let unmarshal (s: Channel.fd) buf = 
+    really_read s sizeof_hdr buf >>= fun x ->
+    return (unmarshal_at x)
+end
+
+module Error = struct
+  include Error
+
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun x ->
+    let len = get_hdr_length x in
+    really_read s (Int32.to_int len) buf >>= fun data ->
+    return (Cstruct.to_string data)
+end
+
+module SecurityType = struct
+  include SecurityType
+
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun x -> 
+    match int_to_code (get_hdr_ty x) with
+    | None -> return (`Error(Failure "unknown SecurityType"))
+    | Some FAILED ->
+      Error.unmarshal s buf >>= fun x ->
+      return (`Ok (Failed x))
+    | Some NOSECURITY -> return (`Ok NoSecurity)
+    | Some VNCAUTH -> return (`Ok VNCAuth)
+
+end
+
+module ClientInit = struct
+  include ClientInit
+
+  let unmarshal_at (s: Channel.fd) x =
+    let shared = get_hdr_shared x in
+    return (shared <> 0)
+
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun x ->
+    unmarshal_at s x
+end
+
+module PixelFormat = struct
+  include PixelFormat
+
+  let rec log2 = function
+    | 0 -> raise Illegal_colour_max
+    | 1 -> 0
+    | n -> log2 (n / 2) + 1
+
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun buf ->
+    let bpp = bpp_of_int (get_hdr_bpp buf) in
+    let depth = get_hdr_depth buf in
+    let big_endian = get_hdr_big_endian buf <> 0 in
+    let true_colour = get_hdr_true_colour buf <> 0 in
+    let red_max_n = log2 (get_hdr_red_max buf + 1) in
+    let green_max_n = log2 (get_hdr_green_max buf + 1) in
+    let blue_max_n = log2 (get_hdr_blue_max buf + 1) in
+    let red_shift = get_hdr_red_shift buf in
+    let green_shift = get_hdr_green_shift buf in
+    let blue_shift = get_hdr_blue_shift buf in
+    return { bpp; depth; big_endian; true_colour;
+      red_max_n; green_max_n; blue_max_n;
+      red_shift; green_shift; blue_shift }
+end
+
+module SetPixelFormat = struct
+  include SetPixelFormat
+
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun _ ->
+    PixelFormat.unmarshal s buf
+end
+
+module SetEncodings = struct
+  include SetEncodings
+
+  let unmarshal (s: Channel.fd) buf =
+    really_read s sizeof_hdr buf >>= fun x ->
+    let num = get_hdr_nr_encodings x in
+    let rec loop acc n =
+      if n > num
+      then return (List.rev acc)
+      else
+        really_read s 4 buf >>= fun x ->
+        match Encoding.of_int32 (Cstruct.BE.get_uint32 x 0) with
+        | None -> loop acc (n + 1)
+        | Some e -> loop (e :: acc) (n + 1) in
+    loop [] 1
+end
+
+module FramebufferUpdateRequest = struct
+  include FramebufferUpdateRequest
+
+  let unmarshal (s: Channel.fd) buf = 
+    really_read s sizeof_hdr buf >>= fun buf ->
+    let incremental = get_hdr_incremental buf <> 0 in
+    let x = get_hdr_x buf in
+    let y = get_hdr_y buf in
+    let width = get_hdr_width buf in
+    let height = get_hdr_height buf in
+    return { incremental; x; y; width; height }
 end
 
 module SetColourMapEntries = struct
