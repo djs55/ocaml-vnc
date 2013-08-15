@@ -360,6 +360,18 @@ module Encoding = struct
     | _     -> None
 end
 
+module SetEncodings = struct
+  type t = Encoding.t list
+
+  cstruct hdr {
+    uint8_t padding;
+    uint16_t nr_encodings
+  } as big_endian
+
+  let prettyprint (x: t) = 
+    Printf.sprintf "SetEncodings (num=%d) [ %s ]" (List.length x) (String.concat "; " (List.map Encoding.to_string x))
+end
+
 module type ASYNC = sig
   type 'a t
 
@@ -458,12 +470,7 @@ module SetPixelFormat = struct
 end
 
 module SetEncodings = struct
-  type t = Encoding.t list
-
-  cstruct hdr {
-    uint8_t padding;
-    uint16_t nr_encodings
-  } as big_endian
+  include SetEncodings
 
   let unmarshal (s: Channel.fd) buf =
     really_read s sizeof_hdr buf >>= fun x ->
@@ -477,9 +484,6 @@ module SetEncodings = struct
         | None -> loop acc (n + 1)
         | Some e -> loop (e :: acc) (n + 1) in
     loop [] 1
-
-  let prettyprint (x: t) = 
-    Printf.sprintf "SetEncodings (num=%d) [ %s ]" (List.length x) (String.concat "; " (List.map Encoding.to_string x))
 end
 
 module FramebufferUpdateRequest = struct
