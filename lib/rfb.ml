@@ -563,7 +563,7 @@ module SetColourMapEntries = struct
       set_colour_b buf b;
       Cstruct.shift buf sizeof_colour
     ) buf x.map in
-    ()
+    Cstruct.sub buf 0 (sizeof x)
 
   let marshal (x: t) = 
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in

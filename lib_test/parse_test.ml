@@ -83,6 +83,12 @@ let fbu_raw () =
   let buf' = FramebufferUpdate.marshal_at x buf in
   check buf' expected
 
+let setcolourmapentries () =
+  let x = { SetColourMapEntries.first_colour = 2; map = [ (1,2,3); (4,5,6) ] } in
+  let expected = [ 1; 0; 0; 2; 0; 2; 0; 1; 0; 2; 0; 3; 0; 4; 0; 5; 0; 6 ] in
+  let buf' = SetColourMapEntries.marshal_at x buf in
+  check buf' expected
+
 let _ =
   let verbose = ref false in
   Arg.parse [
@@ -100,6 +106,7 @@ let _ =
       "fbu_0" >:: fbu_0;
       "fbu_copyrect" >:: fbu_copyrect;
       "fbu_raw" >:: fbu_raw;
+      "setcolourmapentries" >:: setcolourmapentries;
     ] in
   run_test_tt ~verbose:!verbose suite
 
