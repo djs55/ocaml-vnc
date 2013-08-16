@@ -574,6 +574,20 @@ module SetColourMapEntries = struct
     Cstruct.to_string buf
 end
 
+module KeyEvent = struct
+  type t = { down: bool; key: int32 }
+
+  cstruct hdr {
+    uint8_t down;
+    uint16_t padding;
+    uint32_t key
+  } as big_endian
+
+  let prettyprint (x: t) = 
+    Printf.sprintf "KeyEvent { down = %b; key = %s }"
+      x.down (Int32.to_string x.key)
+end
+
 module type ASYNC = sig
   type 'a t
 
@@ -702,23 +716,13 @@ module FramebufferUpdateRequest = struct
 end
 
 module KeyEvent = struct
-  type t = { down: bool; key: int32 }
-
-  cstruct hdr {
-    uint8_t down;
-    uint16_t padding;
-    uint32_t key
-  } as big_endian
+  include KeyEvent
 
   let unmarshal (s: Channel.fd) buf =
     really_read s sizeof_hdr buf >>= fun buf ->
     let down = get_hdr_down buf <> 0 in
     let key = get_hdr_key buf in
     return { down; key }
-
-  let prettyprint (x: t) = 
-    Printf.sprintf "KeyEvent { down = %b; key = %s }"
-      x.down (Int32.to_string x.key)
 end
 
 module PointerEvent = struct
