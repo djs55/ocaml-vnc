@@ -536,6 +536,41 @@ module FramebufferUpdate = struct
       t.x t.y t.w t.h (Encoding.prettyprint t.encoding)
 end
 
+module SetColourMapEntries = struct
+  type t = { first_colour: int; 
+	     map: (int * int * int) list }
+
+  cstruct hdr {
+    uint8_t padding;
+    uint16_t first_colour;
+    uint16_t nr_colours
+  } as big_endian
+
+  cstruct colour {
+    uint16_t r;
+    uint16_t g;
+    uint16_t b
+  } as big_endian
+
+  let sizeof x = sizeof_hdr + (List.length x.map * sizeof_colour)
+
+  let marshal_at (x: t) buf =
+    set_hdr_first_colour buf x.first_colour;
+    set_hdr_nr_colours buf (List.length x.map);
+    let (_: Cstruct.t) = List.fold_left (fun buf (r, g, b) ->
+      set_colour_r buf r;
+      set_colour_g buf g;
+      set_colour_b buf b;
+      Cstruct.shift buf sizeof_colour
+    ) buf x.map in
+    ()
+
+  let marshal (x: t) = 
+    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
+    marshal_at x buf;
+    Cstruct.to_string buf
+end
+
 module type ASYNC = sig
   type 'a t
 
@@ -661,41 +696,6 @@ module FramebufferUpdateRequest = struct
     let width = get_hdr_width buf in
     let height = get_hdr_height buf in
     return { incremental; x; y; width; height }
-end
-
-module SetColourMapEntries = struct
-  type t = { first_colour: int; 
-	     map: (int * int * int) list }
-
-  cstruct hdr {
-    uint8_t padding;
-    uint16_t first_colour;
-    uint16_t nr_colours
-  } as big_endian
-
-  cstruct colour {
-    uint16_t r;
-    uint16_t g;
-    uint16_t b
-  } as big_endian
-
-  let sizeof x = sizeof_hdr + (List.length x.map * sizeof_colour)
-
-  let marshal_at (x: t) buf =
-    set_hdr_first_colour buf x.first_colour;
-    set_hdr_nr_colours buf (List.length x.map);
-    let (_: Cstruct.t) = List.fold_left (fun buf (r, g, b) ->
-      set_colour_r buf r;
-      set_colour_g buf g;
-      set_colour_b buf b;
-      Cstruct.shift buf sizeof_colour
-    ) buf x.map in
-    ()
-
-  let marshal (x: t) = 
-    let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
-    marshal_at x buf;
-    Cstruct.to_string buf
 end
 
 module KeyEvent = struct
