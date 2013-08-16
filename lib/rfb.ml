@@ -541,6 +541,7 @@ module SetColourMapEntries = struct
 	     map: (int * int * int) list }
 
   cstruct hdr {
+    uint8_t ty;
     uint8_t padding;
     uint16_t first_colour;
     uint16_t nr_colours
@@ -555,6 +556,8 @@ module SetColourMapEntries = struct
   let sizeof x = sizeof_hdr + (List.length x.map * sizeof_colour)
 
   let marshal_at (x: t) buf =
+    set_hdr_ty buf 1;
+    set_hdr_padding buf 0;
     set_hdr_first_colour buf x.first_colour;
     set_hdr_nr_colours buf (List.length x.map);
     let (_: Cstruct.t) = List.fold_left (fun buf (r, g, b) ->
@@ -562,7 +565,7 @@ module SetColourMapEntries = struct
       set_colour_g buf g;
       set_colour_b buf b;
       Cstruct.shift buf sizeof_colour
-    ) buf x.map in
+    ) (Cstruct.shift buf sizeof_hdr) x.map in
     Cstruct.sub buf 0 (sizeof x)
 
   let marshal (x: t) = 
