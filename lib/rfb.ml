@@ -667,7 +667,7 @@ module SetPixelFormat = struct
   include SetPixelFormat
 
   let unmarshal (s: Channel.fd) buf =
-    really_read s sizeof_hdr buf >>= fun _ ->
+    really_read s (sizeof_hdr - 1) buf >>= fun _ ->
     PixelFormat.unmarshal s buf
 end
 
