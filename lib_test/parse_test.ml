@@ -96,6 +96,12 @@ let setcolourmapentries () =
   let buf' = SetColourMapEntries.marshal_at x buf in
   check buf' expected
 
+let setencodings () =
+  let x = [ 1l; 2l ] in
+  let expected = [ 2; 0; 0; 2; 0; 0; 0; 1; 0; 0; 0; 2 ] in
+  let buf' = SetEncodings.marshal_at x buf in
+  check buf' expected
+
 let _ =
   let verbose = ref false in
   Arg.parse [
@@ -114,6 +120,7 @@ let _ =
       "fbu_copyrect" >:: fbu_copyrect;
       "fbu_raw" >:: fbu_raw;
       "setcolourmapentries" >:: setcolourmapentries;
+      "setencodings" >:: setencodings;
     ] in
   run_test_tt ~verbose:!verbose suite
 
