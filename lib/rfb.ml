@@ -300,14 +300,12 @@ module SetPixelFormat = struct
   type t = PixelFormat.t
 
   cstruct hdr {
-    uint8_t ty;
     uint8_t padding[3]
   } as big_endian
 
   let sizeof _ = sizeof_hdr + PixelFormat.sizeof_hdr
 
   let marshal_at (x: t) buf =
-    set_hdr_ty buf (ClientRequestType.(to_int SetPixelFormat));
     set_hdr_padding "\000\000\000" 0 buf;
     PixelFormat.marshal_at x (Cstruct.shift buf sizeof_hdr);
     Cstruct.sub buf 0 (sizeof x)
@@ -368,6 +366,14 @@ module SetEncodings = struct
     uint16_t nr_encodings
   } as big_endian
 
+  let sizeof ts = sizeof_hdr + 4 * (List.length ts)
+
+  let marshal_at ts buf =
+    set_hdr_padding buf 0;
+    set_hdr_nr_encodings buf (List.length ts);
+    List.iteri (fun i e -> Cstruct.BE.set_uint32 buf (sizeof_hdr + 4 * i) (Encoding.to_int32 e)) ts;
+    Cstruct.sub buf 0 (sizeof ts)
+
   let prettyprint (x: t) = 
     Printf.sprintf "SetEncodings (num=%d) [ %s ]" (List.length x) (String.concat "; " (List.map Encoding.to_string x))
 end
@@ -384,6 +390,14 @@ module FramebufferUpdateRequest = struct
     uint16_t width;
     uint16_t height
   } as big_endian
+
+  let marshal_at (t: t) buf =
+    set_hdr_incremental buf (if t.incremental then 1 else 0);
+    set_hdr_x buf t.x;
+    set_hdr_y buf t.y;
+    set_hdr_width buf t.width;
+    set_hdr_height buf t.height;
+    Cstruct.sub buf 0 sizeof_hdr
 
   let prettyprint (x: t) = 
     Printf.sprintf "FrameBufferUpdateRequest (incr=%b x=%d y=%d width=%d height=%d)" x.incremental x.x x.y x.width x.height
@@ -513,19 +527,20 @@ module FramebufferUpdate = struct
     Encoding.marshal_at x.encoding (Cstruct.shift buf sizeof_rectangle)
 
   cstruct hdr {
-    uint8_t ty;
     uint8_t padding;
     uint16_t nr_rectangles
   } as big_endian
 
-  let marshal_at (xs: t list) buf =
-    set_hdr_ty buf 0;
+  let marshal_at (xs: t list) buf' =
+    Cstruct.set_uint8 buf' 0 0;
+    let buf = Cstruct.shift buf' 1 in
+    set_hdr_padding buf 0;
     set_hdr_nr_rectangles buf (List.length xs);
     let (_: Cstruct.t) = List.fold_left (fun buf x ->
       let (_: Cstruct.t) = marshal_rectangle_at x buf in
       Cstruct.shift buf (sizeof_rectangle + (Encoding.sizeof x.encoding))
     ) (Cstruct.shift buf sizeof_hdr) xs in
-    Cstruct.sub buf 0 (sizeof xs)
+    Cstruct.sub buf' 0 (sizeof xs)
 
   let marshal (xs: t list) = 
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof xs))) in
@@ -541,7 +556,6 @@ module SetColourMapEntries = struct
 	     map: (int * int * int) list }
 
   cstruct hdr {
-    uint8_t ty;
     uint8_t padding;
     uint16_t first_colour;
     uint16_t nr_colours
@@ -553,10 +567,11 @@ module SetColourMapEntries = struct
     uint16_t b
   } as big_endian
 
-  let sizeof x = sizeof_hdr + (List.length x.map * sizeof_colour)
+  let sizeof x = 1 + sizeof_hdr + (List.length x.map * sizeof_colour)
 
-  let marshal_at (x: t) buf =
-    set_hdr_ty buf 1;
+  let marshal_at (x: t) buf' =
+    Cstruct.set_uint8 buf' 0 1;
+    let buf = Cstruct.shift buf' 1 in
     set_hdr_padding buf 0;
     set_hdr_first_colour buf x.first_colour;
     set_hdr_nr_colours buf (List.length x.map);
@@ -566,7 +581,7 @@ module SetColourMapEntries = struct
       set_colour_b buf b;
       Cstruct.shift buf sizeof_colour
     ) (Cstruct.shift buf sizeof_hdr) x.map in
-    Cstruct.sub buf 0 (sizeof x)
+    Cstruct.sub buf' 0 (sizeof x)
 
   let marshal (x: t) = 
     let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout (sizeof x))) in
@@ -583,6 +598,12 @@ module KeyEvent = struct
     uint32_t key
   } as big_endian
 
+  let marshal_at (t: t) buf =
+    set_hdr_down buf (if t.down then 1 else 0);
+    set_hdr_padding buf 0;
+    set_hdr_key buf t.key;
+    Cstruct.sub buf 0 sizeof_hdr
+
   let prettyprint (x: t) = 
     Printf.sprintf "KeyEvent { down = %b; key = %s }"
       x.down (Int32.to_string x.key)
@@ -597,6 +618,12 @@ module PointerEvent = struct
     uint16_t y
   } as big_endian
 
+  let marshal_at (t: t) buf =
+    set_hdr_mask buf t.mask;
+    set_hdr_x buf t.x;
+    set_hdr_y buf t.y;
+    Cstruct.sub buf 0 sizeof_hdr
+
   let prettyprint (x: t) = 
     Printf.sprintf "PointerEvent { mask = %d; x = %d; y = %d }"
       x.mask x.x x.y
@@ -609,6 +636,13 @@ module ClientCutText = struct
     uint8_t padding[3];
     uint32_t length
   } as big_endian
+
+  let marshal_at (t: t) buf =
+    set_hdr_padding "\000\000\000" 0 buf;
+    let l = String.length t in
+    set_hdr_length buf (Int32.of_int l);
+    Cstruct.blit_from_string t 0 buf sizeof_hdr l;
+    Cstruct.sub buf 0 (sizeof_hdr + l)
 
   let prettyprint (x: t) = 
     Printf.sprintf "ClientCutText { %s }" x
@@ -630,6 +664,37 @@ module Request = struct
     | KeyEvent x -> KeyEvent.prettyprint x
     | PointerEvent x -> PointerEvent.prettyprint x
     | ClientCutText x -> ClientCutText.prettyprint x
+
+  cstruct hdr {
+    uint8_t ty
+  } as big_endian
+ 
+  let marshal_at x buf = match x with
+    | SetPixelFormat x ->
+      set_hdr_ty buf (ClientRequestType.(to_int SetPixelFormat));
+      let sub = SetPixelFormat.marshal_at x (Cstruct.shift buf 1) in
+      Cstruct.sub buf 0 (Cstruct.len sub + 1)
+    | SetEncodings x ->
+      set_hdr_ty buf (ClientRequestType.(to_int SetEncodings));
+      let sub = SetEncodings.marshal_at x (Cstruct.shift buf 1) in
+      Cstruct.sub buf 0 (Cstruct.len sub + 1)
+    | FrameBufferUpdateRequest x ->
+      set_hdr_ty buf (ClientRequestType.(to_int FramebufferUpdateRequest));
+      let sub = FramebufferUpdateRequest.marshal_at x (Cstruct.shift buf 1) in
+      Cstruct.sub buf 0 (Cstruct.len sub + 1)
+    | KeyEvent x ->
+      set_hdr_ty buf (ClientRequestType.(to_int KeyEvent));
+      let sub = KeyEvent.marshal_at x (Cstruct.shift buf 1) in
+      Cstruct.sub buf 0 (Cstruct.len sub + 1)
+    | PointerEvent x ->
+      set_hdr_ty buf (ClientRequestType.(to_int PointerEvent));
+      let sub = PointerEvent.marshal_at x (Cstruct.shift buf 1) in
+      Cstruct.sub buf 0 (Cstruct.len sub + 1)
+    | ClientCutText x ->
+      set_hdr_ty buf (ClientRequestType.(to_int ClientCutText));
+      let sub = ClientCutText.marshal_at x (Cstruct.shift buf 1) in
+      Cstruct.sub buf 0 (Cstruct.len sub + 1)
+     
 end
 
 module type ASYNC = sig
@@ -725,7 +790,7 @@ module SetPixelFormat = struct
   include SetPixelFormat
 
   let unmarshal (s: Channel.fd) buf =
-    really_read s (sizeof_hdr - 1) buf >>= fun _ ->
+    really_read s sizeof_hdr buf >>= fun _ ->
     PixelFormat.unmarshal s buf
 end
 

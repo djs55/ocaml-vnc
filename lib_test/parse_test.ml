@@ -70,7 +70,7 @@ let serverinit () =
 
 let setpixelformat () =
   let expected = [ 0; 0; 0; 0; ] @ example_pixelformat_expected in
-  let buf' = SetPixelFormat.marshal_at example_pixelformat buf in
+  let buf' = Request.marshal_at (Request.SetPixelFormat example_pixelformat) buf in
   check buf' expected
 
 let fbu_0 () =
@@ -97,9 +97,9 @@ let setcolourmapentries () =
   check buf' expected
 
 let setencodings () =
-  let x = [ 1l; 2l ] in
+  let x = Request.SetEncodings [ Encoding.CopyRect; Encoding.RRE ] in
   let expected = [ 2; 0; 0; 2; 0; 0; 0; 1; 0; 0; 0; 2 ] in
-  let buf' = SetEncodings.marshal_at x buf in
+  let buf' = Request.marshal_at x buf in
   check buf' expected
 
 let _ =
