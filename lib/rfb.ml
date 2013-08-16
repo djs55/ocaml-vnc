@@ -614,6 +614,24 @@ module ClientCutText = struct
     Printf.sprintf "ClientCutText { %s }" x
 end
 
+module Request = struct
+  type t = 
+    | SetPixelFormat of SetPixelFormat.t
+    | SetEncodings of SetEncodings.t	
+    | FrameBufferUpdateRequest of FramebufferUpdateRequest.t
+    | KeyEvent of KeyEvent.t
+    | PointerEvent of PointerEvent.t
+    | ClientCutText of ClientCutText.t
+
+  let prettyprint = function
+    | SetPixelFormat x -> SetPixelFormat.prettyprint x
+    | SetEncodings x -> SetEncodings.prettyprint x
+    | FrameBufferUpdateRequest x -> FramebufferUpdateRequest.prettyprint x
+    | KeyEvent x -> KeyEvent.prettyprint x
+    | PointerEvent x -> PointerEvent.prettyprint x
+    | ClientCutText x -> ClientCutText.prettyprint x
+end
+
 module type ASYNC = sig
   type 'a t
 
@@ -773,21 +791,7 @@ module ClientCutText = struct
 end
 
 module Request = struct
-  type t = 
-    | SetPixelFormat of SetPixelFormat.t
-    | SetEncodings of SetEncodings.t	
-    | FrameBufferUpdateRequest of FramebufferUpdateRequest.t
-    | KeyEvent of KeyEvent.t
-    | PointerEvent of PointerEvent.t
-    | ClientCutText of ClientCutText.t
-
-  let prettyprint = function
-    | SetPixelFormat x -> SetPixelFormat.prettyprint x
-    | SetEncodings x -> SetEncodings.prettyprint x
-    | FrameBufferUpdateRequest x -> FramebufferUpdateRequest.prettyprint x
-    | KeyEvent x -> KeyEvent.prettyprint x
-    | PointerEvent x -> PointerEvent.prettyprint x
-    | ClientCutText x -> ClientCutText.prettyprint x
+  include Request
 
   let unmarshal (s: Channel.fd) buf =
     really_read s 1 buf >>= fun x ->
