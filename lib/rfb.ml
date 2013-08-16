@@ -588,6 +588,20 @@ module KeyEvent = struct
       x.down (Int32.to_string x.key)
 end
 
+module PointerEvent = struct
+  type t = { mask: int; x: int; y: int }
+
+  cstruct hdr {
+    uint8_t mask;
+    uint16_t x;
+    uint16_t y
+  } as big_endian
+
+  let prettyprint (x: t) = 
+    Printf.sprintf "PointerEvent { mask = %d; x = %d; y = %d }"
+      x.mask x.x x.y
+end
+
 module type ASYNC = sig
   type 'a t
 
@@ -726,13 +740,7 @@ module KeyEvent = struct
 end
 
 module PointerEvent = struct
-  type t = { mask: int; x: int; y: int }
-
-  cstruct hdr {
-    uint8_t mask;
-    uint16_t x;
-    uint16_t y
-  } as big_endian
+  include PointerEvent
 
   let unmarshal (s: Channel.fd) buf =
     really_read s sizeof_hdr buf >>= fun buf ->
@@ -740,10 +748,6 @@ module PointerEvent = struct
     let x = get_hdr_x buf in
     let y = get_hdr_y buf in
     return { mask; x; y }
-
-  let prettyprint (x: t) = 
-    Printf.sprintf "PointerEvent { mask = %d; x = %d; y = %d }"
-      x.mask x.x x.y
 end
 
 module ClientCutText = struct
