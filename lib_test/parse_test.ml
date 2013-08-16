@@ -17,10 +17,17 @@ open OUnit
 let buf = Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout 4096))
 
 let check c hex =
-  assert_equal ~printer:string_of_int (List.length hex) (Cstruct.len c);
-  List.iteri (fun i x ->
-    assert_equal ~printer:(fun x -> Printf.sprintf "at offset %d: %d" i x) x (Cstruct.get_uint8 c i)
-  ) hex
+  try
+    assert_equal ~printer:string_of_int (List.length hex) (Cstruct.len c);
+    List.iteri (fun i x ->
+      assert_equal ~printer:(fun x -> Printf.sprintf "at offset %d: %d" i x) x (Cstruct.get_uint8 c i)
+    ) hex
+  with e ->
+    Printf.fprintf stderr "expected:\n";
+    List.iter (fun x -> Printf.fprintf stderr "%02x " x) hex;
+    Printf.fprintf stderr "\nactual: %!";
+    Cstruct.hexdump c;
+    raise e
 
 let protocolversion () =
   let ver = { ProtocolVersion.major = 3; minor = 3 } in
