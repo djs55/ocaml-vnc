@@ -602,6 +602,18 @@ module PointerEvent = struct
       x.mask x.x x.y
 end
 
+module ClientCutText = struct
+  type t = string
+
+  cstruct hdr {
+    uint8_t padding[3];
+    uint32_t length
+  } as big_endian
+
+  let prettyprint (x: t) = 
+    Printf.sprintf "ClientCutText { %s }" x
+end
+
 module type ASYNC = sig
   type 'a t
 
@@ -751,20 +763,13 @@ module PointerEvent = struct
 end
 
 module ClientCutText = struct
-  type t = string
-
-  cstruct hdr {
-    uint8_t padding[3];
-    uint32_t length
-  } as big_endian
+  include ClientCutText
 
   let unmarshal (s: Channel.fd) buf =
     really_read s sizeof_hdr buf >>= fun buf ->
     let length = get_hdr_length buf in
     really_read s (Int32.to_int length) buf >>= fun buf ->
     return (Cstruct.to_string buf)
-  let prettyprint (x: t) = 
-    Printf.sprintf "ClientCutText { %s }" x
 end
 
 module Request = struct
