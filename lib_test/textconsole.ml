@@ -27,18 +27,76 @@ end
 
 module CoordMap = Map.Make(Coord)
 
+module Colour = struct
+  type t = {
+    red: int;
+    green: int;
+    blue: int;
+  }
+
+  let black          = { red = 0;   green = 0;   blue = 0 }
+  let white          = { red = 255; green = 255; blue = 255 }
+  (* xterm colour scheme *)
+  let red            = { red = 205; green = 0;   blue = 0 }
+  let green          = { red = 0;   green = 205; blue = 0 }
+  let yellow         = { red = 205; green = 205; blue = 0 }
+  let blue           = { red = 0;   green = 0;   blue = 205 }
+  let magenta        = { red = 205; green = 0;   blue = 205 }
+  let cyan           = { red = 0;   green = 205; blue = 205 }
+  let gray           = { red = 229; green = 229; blue = 229 }
+  let darkgray       = { red = 127; green = 127; blue = 127 }
+  let bright_red     = { red = 255; green = 0;   blue = 0 }
+  let bright_green   = { red = 0;   green = 255; blue = 0 }
+  let bright_yellow  = { red = 255; green = 255; blue = 0 }
+  let bright_blue    = { red = 0;   green = 0;   blue = 255 }
+  let bright_magenta = { red = 255; green = 0;   blue = 255 }
+  let bright_cyan    = { red = 0;   green = 255; blue = 255 }
+
+end
+
+module Attribute = struct
+  type t = {
+    bright: bool;
+    underscore: bool;
+    blink: bool;
+    background: Colour.t;
+    foreground: Colour.t;
+  }
+end
+
+module Char = struct
+  type t = {
+    code: int; (** TODO: this is an XKeysym *)
+    attribute: Attribute.t;
+  }
+
+  let make attribute code = { attribute; code }
+
+  let to_debug_string t = string_of_int t.code
+
+  let to_char t = char_of_int t.code
+end
+
 module Console = struct
   type t = {
-    chars: int CoordMap.t;
+    chars: Char.t CoordMap.t;
     max_chars: int;  (* maximum number of stored characters *)
     cursor: Coord.t; (* XXX: should this be moved to the Window *)
     cols: int;
+    current_attribute: Attribute.t;
   }
 
   let make ?(max_chars = 80 * 100) cols =
     let chars = CoordMap.empty in
     let cursor = 0, 0 in
-    { cols; chars; max_chars; cursor }
+    let current_attribute = {
+      Attribute.bright = false;
+      underscore = false;
+      blink = false;
+      foreground = Colour.white;
+      background = Colour.black;
+    } in
+    { cols; chars; max_chars; cursor; current_attribute }
 
   let output_char (t: t) c =
     let chars =
@@ -48,7 +106,7 @@ module Console = struct
     if c = '\n'
     then { t with chars = chars; cursor = fst t.cursor + 1, 0 }
     else
-      let chars = CoordMap.add t.cursor (int_of_char c) chars in
+      let chars = CoordMap.add t.cursor (Char.make t.current_attribute (int_of_char c)) chars in
       let cursor =
         if snd t.cursor = t.cols - 1
         then fst t.cursor + 1, 0
@@ -84,13 +142,13 @@ module Window = struct
 end
 
 type cell = {
-  char: int option;
+  char: Char.t option;
   highlight: bool;
 }
 
 let string_of_cell c =
   Printf.sprintf "char = %s; highlight = %b"
-    (match c.char with None -> "None" | Some x -> String.make 1 (char_of_int x))
+    (match c.char with None -> "None" | Some x -> Char.to_debug_string x)
   c.highlight
 
 module CellMap = Map.Make(struct
@@ -138,7 +196,10 @@ module Screen = struct
       for col = 0 to t.cols - 1 do
         try
           let c = CoordMap.find (row, col) t.cells in
-          print_string (String.make 1 (match c.char with None -> ' ' | Some x -> char_of_int x))
+          print_string (match c.char with
+            | None -> " "
+            | Some c -> String.make 1 (Char.to_char c)
+          )
         with Not_found -> ()
       done;
       print_string "\n"

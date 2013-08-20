@@ -26,14 +26,63 @@ module CoordMap : sig
   include module type of Map.Make(Coord)
 end
 
+module Colour : sig
+  type t = {
+    red: int;
+    green: int;
+    blue: int;
+  }
+
+  val black: t
+  val white: t
+  val red: t
+  val green: t
+  val yellow: t
+  val blue: t
+  val magenta: t
+  val cyan: t
+  val gray: t
+  val darkgray: t
+  val bright_red: t
+  val bright_green: t
+  val bright_yellow: t
+  val bright_blue: t
+  val bright_magenta: t
+  val bright_cyan: t
+end
+
+module Attribute : sig
+  (** The style of a character written to a console *)
+
+  type t = {
+    bright: bool;
+    underscore: bool;
+    blink: bool;
+    background: Colour.t;
+    foreground: Colour.t;
+  }
+end
+
+module Char : sig
+  (** Represents a character with style *)
+
+  type t = {
+    code: int;
+    attribute: Attribute.t;
+  }
+
+  val make: Attribute.t -> int -> t
+end
+
 module Console : sig
   (** Represents the entire console contents. *)
 
   type t = {
-    chars: int CoordMap.t;  (** entire contents stored as a sparse map *)
-    max_chars: int;         (** maximum scrollback size in characters *)
-    cursor: Coord.t;        (** the cursor position *)
-    cols: int;              (** the width in characters, used for wrapping the cursor *)
+    chars: Char.t CoordMap.t;       (** entire contents stored as a sparse map *)
+    max_chars: int;                 (** maximum scrollback size in characters *)
+    cursor: Coord.t;                (** the cursor position *)
+    cols: int;                      (** the width in characters, used for wrapping the cursor *)
+    current_attribute: Attribute.t; (** new characters will be written in this style *)
   }
 
   val make: ?max_chars:int -> int -> t
@@ -79,7 +128,7 @@ module Screen : sig
 end
 
 type cell = {
-  char: int option;      (** visible symbol or 'glyph' *)
+  char: Char.t option;      (** visible symbol or 'glyph' *)
   highlight: bool;
 }
 

@@ -41,7 +41,7 @@ let write_raw_char pf font highlight c =
   let font_height = height_of_font font in
   let bytes_per_pixel = PixelFormat.bytes_per_pixel pf in
   let buffer = String.create (font_width * font_height * bytes_per_pixel) in
-  let e = Pcf.Encoding.of_int c in
+  let e = Pcf.Encoding.of_int c.Char.code in
   let pixels = match Pcf.Glyph.get_bitmap font e with
   | Some pixels -> pixels
   | None ->
@@ -53,11 +53,13 @@ let write_raw_char pf font highlight c =
       Array.iteri
         (fun col pixel ->
           let ofs = (row * font_width + col) * bytes_per_pixel in
-          let r, g, b =
+          let open Attribute in
+          let open Colour in
+          let a =
             if (pixel && not highlight) || (not pixel && highlight)
-            then 0xff, 0xff, 0xff
-            else 0x0,  0x0,  0x0 in
-          let encoded = Pixel.encode pf r g b in
+            then c.Char.attribute.foreground
+            else c.Char.attribute.background in
+          let encoded = Pixel.encode pf a.red a.green a.blue in
           Pixel.write pf buffer ofs encoded;
         ) row_data
     ) pixels;
