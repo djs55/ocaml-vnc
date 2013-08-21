@@ -141,7 +141,7 @@ let wait_for_update c =
       return !console
     )
 
-let server (s: Lwt_unix.file_descr) window font = 
+let server (s: Lwt_unix.file_descr) stdin_w window font = 
   let pf = ref (PixelFormat.true_colour_default Sys.big_endian) in
   let buf = ref (Cstruct.of_bigarray (Bigarray.(Array1.create char c_layout 409600))) in
 
@@ -193,8 +193,14 @@ let server (s: Lwt_unix.file_descr) window font =
         return ()
     | Request.KeyEvent { KeyEvent.down = false; key = key } ->
         (try_lwt
-          let code = char_of_int (Int32.to_int key) in
-          update_console
+          (* TODO: interpret the KeySyms *)
+          let code = 
+            if key = 0xff0dl then '\n'
+            else char_of_int (Int32.to_int key) in
+          let buf = String.make 1 code in
+          lwt n = Lwt_unix.write stdin_w buf 0 1 in
+          if n = 0 then fail End_of_file
+          else update_console
             (fun c ->
               Console.output_char c code
             )
@@ -245,6 +251,24 @@ let main () =
   Printf.fprintf stderr "Setting rows to %d and cols to %d\n%!" rows cols;
 
   console := Console.make cols;
+
+  let stdin_w, stdout_r = 
+    let stdin_r, stdin_w = Unix.pipe () in
+    let stdout_r, stdout_w = Unix.pipe () in
+    let shell = Lwt_process.exec ~stdin:(`FD_move stdin_r) ~stdout:(`FD_copy stdout_w) ~stderr:(`FD_copy stdout_w)
+      ("/bin/bash", [| "/bin/bash" |]) in
+    let stdin_w = Lwt_unix.of_unix_file_descr stdin_w in
+    let stdout_r = Lwt_unix.of_unix_file_descr stdout_r in
+    stdin_w, stdout_r in
+
+  let _ = (* read output of subprocess forever *)
+    let buf = String.make 1 '\000' in
+    while_lwt true do
+      lwt n = Lwt_unix.read stdout_r buf 0 1 in
+      if n = 0 then fail End_of_file
+      else update_console (fun c -> Console.output_char c buf.[0]);
+    done in
+(*
   let _ =
     let j = ref 0 in
     while_lwt true do
@@ -256,7 +280,7 @@ let main () =
         update_console (fun c -> Console.output_char c t.[i])
       done
     done in
-
+*)
   let port = 5902 in
   let s = Lwt_unix.socket Lwt_unix.PF_INET Unix.SOCK_STREAM 0 in
   Unix.handle_unix_error (Unix.setsockopt (Lwt_unix.unix_file_descr s) Unix.SO_REUSEADDR) true;
@@ -268,6 +292,6 @@ let main () =
   Printf.printf "Listening on local port %d\n" port; flush stdout;
   Lwt_unix.listen s 5;
   lwt x = Lwt_unix.accept s in
-  server (fst x) window font
+  server (fst x) stdin_w window font
 
 let _ = Lwt_main.run (main ())
