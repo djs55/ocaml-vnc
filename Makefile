@@ -11,6 +11,9 @@ build: configure
 install: build
 	ocaml setup.ml -install
 
+test: build
+	./parse_test.native
+
 .PHONY: clean
 clean:
 	rm -rf _build
